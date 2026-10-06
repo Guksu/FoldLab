@@ -1,13 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Braces,
+  CircleAlert,
+  CircleCheck,
+  Columns2,
+  FoldVertical,
+  Globe,
+  Info,
+  LayoutGrid,
+  MonitorSmartphone,
+  Play,
+  Plus,
+  RotateCw,
+  ShieldCheck,
+  Smartphone,
+  Trash2,
+  type LucideIcon,
+} from 'lucide-react';
 import { DEFAULT_DEVICE_ID, DEVICES } from '../../shared/devices';
 import { computeLayout, resolveFit } from '../../shared/geometry';
 import type { CaptureResult, SessionState } from '../../shared/protocol';
 import type { Analysis, DeviceKind, DeviceSpec, DisplayMode, FitPolicy } from '../../shared/types';
 import { CustomDeviceDialog } from './components/CustomDeviceDialog';
+import type { OverlayToggles } from './components/DeviceArt';
 import { IssuePanel } from './components/IssuePanel';
 import { LiveDevice } from './components/LiveDevice';
-import { SheetView } from './components/SheetView';
-import type { OverlayToggles } from './components/DeviceArt';
+import { SheetPage } from './components/SheetPage';
+import { Button, IconButton, Logo, Segmented, Select, Switch, ToggleChip } from './components/ui';
 import { MODE_LABEL, postureLabel } from './lib/format';
 import { FoldLabClient, type ConnectionStatus } from './lib/session';
 import { buildMarkdown, copyPng, downloadBlob, sheetFilename, svgToPng } from './lib/sheet';
@@ -22,12 +43,26 @@ const KIND_LABEL: Record<DeviceKind, string> = {
   trifold: '트라이폴드',
 };
 
+const KIND_SHORT: Record<DeviceKind, string> = {
+  book: '책형 폴더블',
+  flip: '플립',
+  dual: '듀얼 스크린',
+  trifold: '트라이폴드',
+};
+
 const STATUS_LABEL: Record<DeviceSpec['status'], string> = {
   released: '',
   announced: ' (발표)',
   rumored: ' (루머 기반 추정)',
   custom: ' (사용자 정의)',
 };
+
+const OVERLAYS: [keyof OverlayToggles, string, LucideIcon][] = [
+  ['zones', '접는 선·힌지', FoldVertical],
+  ['safe', '안전 영역', ShieldCheck],
+  ['issues', '문제 위치', CircleAlert],
+  ['segments', '세그먼트', Columns2],
+];
 
 interface Saved {
   url?: string;
@@ -38,6 +73,17 @@ interface Saved {
   toggles?: OverlayToggles;
   debug?: boolean;
 }
+
+interface Toast {
+  text: string;
+  kind: 'success' | 'info' | 'error';
+}
+
+const TOAST_ICON: Record<Toast['kind'], LucideIcon> = {
+  success: CircleCheck,
+  info: Info,
+  error: CircleAlert,
+};
 
 function loadSaved(): Saved {
   try {
@@ -80,16 +126,6 @@ function useElementSize<T extends HTMLElement>() {
   return [ref, size] as const;
 }
 
-function Logo() {
-  return (
-    <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden>
-      <rect x="2" y="4" width="10" height="18" rx="2.5" fill="#1f2329" />
-      <rect x="14" y="4" width="10" height="18" rx="2.5" fill="#e5484d" />
-      <rect x="12" y="6" width="2" height="14" fill="#f08c00" />
-    </svg>
-  );
-}
-
 export function App() {
   const saved = useMemo(loadSaved, []);
   const params = useMemo(() => new URLSearchParams(location.search), []);
@@ -117,16 +153,16 @@ export function App() {
   const [capture, setCapture] = useState<CaptureResult | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number; postureId: string } | null>(null);
   const [sheetDebug, setSheetDebug] = useState(true);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
   const sheetRef = useRef<SVGSVGElement>(null);
-  const [stageRef, stage] = useElementSize<HTMLDivElement>();
+  const [stageRef, stage] = useElementSize<HTMLElement>();
 
   const validPosture = device.postures.some((p) => p.id === postureId) ? postureId : device.postures[1]?.id ?? device.postures[0].id;
   const activePosture = session?.postureId && session.deviceId === device.id ? session.postureId : validPosture;
 
   const toastTimer = useRef(0);
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
+  const showToast = useCallback((text: string, kind: Toast['kind'] = 'success') => {
+    setToast({ text, kind });
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 4200);
   }, []);
@@ -168,11 +204,11 @@ export function App() {
           setCapture(m.result);
           break;
         case 'dialog':
-          showToast(`페이지 ${m.kind}: ${m.message}`);
+          showToast(`페이지 ${m.kind}: ${m.message}`, 'info');
           break;
         case 'error':
           setProgress(null);
-          showToast(m.message);
+          showToast(m.message, 'error');
           break;
       }
     });
@@ -242,12 +278,12 @@ export function App() {
 
   const startCapture = () => {
     if (!session) {
-      showToast('먼저 주소를 열어 주세요.');
+      showToast('먼저 주소를 열어 주세요.', 'error');
       return;
     }
     const ids = device.postures.filter((p) => sheetPostures.includes(p.id)).map((p) => p.id);
     if (!ids.length) {
-      showToast('캡처할 자세를 하나 이상 고르세요.');
+      showToast('캡처할 자세를 하나 이상 고르세요.', 'error');
       return;
     }
     setProgress({ done: 0, total: ids.length, postureId: ids[0] });
@@ -265,7 +301,7 @@ export function App() {
         downloadBlob(blob, sheetFilename(capture, device, sheetDebug));
       }
     } catch (err) {
-      showToast(`내보내기 실패: ${(err as Error).message}`);
+      showToast(`내보내기 실패: ${(err as Error).message}`, 'error');
     }
   };
 
@@ -275,7 +311,7 @@ export function App() {
       await navigator.clipboard.writeText(buildMarkdown(capture, device));
       showToast('Markdown 요약을 복사했습니다.');
     } catch {
-      showToast('클립보드에 접근할 수 없습니다.');
+      showToast('클립보드에 접근할 수 없습니다.', 'error');
     }
   };
 
@@ -291,6 +327,7 @@ export function App() {
   const groups = (Object.keys(KIND_LABEL) as DeviceKind[])
     .map((kind) => ({ kind, items: DEVICES.filter((d) => d.kind === kind) }))
     .filter((g) => g.items.length);
+  const screenLabel = device.screens.find((s) => s.id === device.postures.find((p) => p.id === activePosture)?.screen)?.label;
 
   const addCustomDevice = (d: DeviceSpec) => {
     const list = [...customDevices.filter((c) => c.id !== d.id), d];
@@ -307,6 +344,7 @@ export function App() {
     setCustomDevices(list);
     saveCustomDevices(list);
     changeDevice(DEFAULT_DEVICE_ID, [...DEVICES, ...list]);
+    showToast(`'${device.name}' 기기를 삭제했습니다.`);
   };
 
   const copyDeviceJson = async () => {
@@ -314,22 +352,33 @@ export function App() {
       await navigator.clipboard.writeText(JSON.stringify(device, null, 2));
       showToast('기기 정의 JSON을 복사했습니다. 팀원에게 공유해 가져오기로 추가할 수 있습니다.');
     } catch {
-      showToast('클립보드에 접근할 수 없습니다.');
+      showToast('클립보드에 접근할 수 없습니다.', 'error');
     }
   };
 
   const demoUrl = `${location.origin}/demo/trip`;
+  const connText =
+    conn === 'open' ? (browserVersion ? `Chromium ${browserVersion.split('.')[0]}` : '연결됨') : conn === 'closed' ? '서버 연결 끊김' : '연결 중';
 
   return (
     <div className="app">
       <header className="topbar">
         <div className="brand">
           <Logo />
-          <div>
-            <b>FoldLab</b>
-            <span>폴더블·듀얼 스크린 화면 디버거</span>
-          </div>
+          FoldLab
         </div>
+        <span className="vsep" aria-hidden />
+        <nav className="nav-tabs" role="tablist" aria-label="보기">
+          <button type="button" role="tab" aria-selected={tab === 'live'} className={tab === 'live' ? 'on' : ''} onClick={() => setTab('live')}>
+            <MonitorSmartphone size={15} aria-hidden />
+            라이브
+          </button>
+          <button type="button" role="tab" aria-selected={tab === 'sheet'} className={tab === 'sheet' ? 'on' : ''} onClick={() => setTab('sheet')}>
+            <LayoutGrid size={15} aria-hidden />
+            비교 시트
+            {capture && capture.deviceId === device.id && tab !== 'sheet' && <span className="tab-dot" aria-label="새 시트" />}
+          </button>
+        </nav>
         <form
           className="urlbar"
           onSubmit={(e) => {
@@ -337,40 +386,35 @@ export function App() {
             open(urlInput);
           }}
         >
-          <div className="nav-buttons">
-            <button type="button" className="icon" title="뒤로" disabled={!session?.canGoBack} onClick={() => client.send({ t: 'history', dir: 'back' })}>
-              ←
-            </button>
-            <button type="button" className="icon" title="앞으로" disabled={!session?.canGoForward} onClick={() => client.send({ t: 'history', dir: 'forward' })}>
-              →
-            </button>
-            <button type="button" className="icon" title="새로고침" disabled={!live} onClick={() => client.send({ t: 'history', dir: 'reload' })}>
-              ↻
-            </button>
+          <div className="nav-group">
+            <IconButton icon={ArrowLeft} label="뒤로" disabled={!session?.canGoBack} onClick={() => client.send({ t: 'history', dir: 'back' })} />
+            <IconButton icon={ArrowRight} label="앞으로" disabled={!session?.canGoForward} onClick={() => client.send({ t: 'history', dir: 'forward' })} />
+            <IconButton icon={RotateCw} label="새로고침" disabled={!live} onClick={() => client.send({ t: 'history', dir: 'reload' })} />
           </div>
-          <input
-            value={urlInput}
-            onChange={(e) => setUrlInput(e.target.value)}
-            placeholder="https://example.com 또는 localhost:3000"
-            aria-label="검사할 주소"
-            spellCheck={false}
-            autoCapitalize="off"
-          />
-          {session?.loading && <span className="spinner" aria-label="불러오는 중" />}
-          <button type="submit" className="primary">
-            열기
-          </button>
+          <div className="url-field">
+            {session?.loading ? <span className="spinner" aria-label="불러오는 중" /> : <Globe size={15} aria-hidden />}
+            <input
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              placeholder="https://example.com 또는 localhost:3000"
+              aria-label="검사할 주소"
+              spellCheck={false}
+              autoCapitalize="off"
+            />
+            <Button type="submit" variant="primary" size="sm" disabled={!urlInput.trim()}>
+              열기
+            </Button>
+          </div>
         </form>
-        <div className={`conn ${conn}`} title={browserVersion ? `Chromium ${browserVersion}` : undefined}>
-          <i />
-          {conn === 'open' ? (browserVersion ? `Chromium ${browserVersion.split('.')[0]}` : '연결됨') : conn === 'connecting' ? '연결 중' : '서버 연결 끊김'}
+        <div className={`conn ${conn}`} title={browserVersion ? `헤드리스 Chromium ${browserVersion}` : undefined}>
+          <i aria-hidden />
+          <span className="conn-text">{connText}</span>
         </div>
       </header>
 
-      <div className="controls">
-        <label className="field">
-          <span>기기</span>
-          <select value={deviceId} onChange={(e) => changeDevice(e.target.value)}>
+      <div className="toolbar">
+        <div className="tool-group">
+          <Select icon={Smartphone} className="device-select" aria-label="기기" value={deviceId} onChange={(e) => changeDevice(e.target.value)}>
             {groups.map((g) => (
               <optgroup key={g.kind} label={KIND_LABEL[g.kind]}>
                 {g.items.map((d) => (
@@ -389,48 +433,48 @@ export function App() {
               ))}
               <option value="__custom">＋ 기기 직접 만들기…</option>
             </optgroup>
-          </select>
-        </label>
-        {device.status === 'custom' && (
-          <div className="custom-actions">
-            <button type="button" className="ghost small" onClick={() => void copyDeviceJson()}>
-              JSON 복사
-            </button>
-            <button type="button" className="ghost small" onClick={removeCustomDevice}>
-              삭제
-            </button>
-          </div>
-        )}
-        <div className="seg" role="radiogroup" aria-label="표시 방식">
-          {(['browser', 'app'] as DisplayMode[]).map((m) => (
-            <button key={m} type="button" role="radio" aria-checked={mode === m} className={mode === m ? 'on' : ''} onClick={() => changeMode(m)}>
-              {MODE_LABEL[m]}
-            </button>
-          ))}
+          </Select>
+          <span className="device-meta">
+            {KIND_SHORT[device.kind]} · {device.platform === 'ios' ? 'iOS' : 'Android'}
+          </span>
+          {device.status === 'custom' && (
+            <>
+              <IconButton icon={Braces} label="기기 정의 JSON 복사" onClick={() => void copyDeviceJson()} />
+              <IconButton icon={Trash2} label="이 기기 삭제" onClick={removeCustomDevice} />
+            </>
+          )}
         </div>
-        <label className="field">
-          <span>viewport-fit</span>
-          <select value={fit} onChange={(e) => changeFit(e.target.value as FitPolicy)}>
+        <span className="vsep" aria-hidden />
+        <div className="tool-group">
+          <Segmented<DisplayMode>
+            label="표시 방식"
+            value={mode}
+            onChange={changeMode}
+            options={[
+              { value: 'browser', label: MODE_LABEL.browser, hint: '주소창과 시스템 바가 있는 크롬·사파리 탭' },
+              { value: 'app', label: MODE_LABEL.app, hint: 'PWA·웹뷰처럼 화면 전체를 쓰는 경우' },
+            ]}
+          />
+        </div>
+        <span className="vsep" aria-hidden />
+        <label className="tool-group">
+          <span className="field-label code">viewport-fit</span>
+          <Select value={fit} onChange={(e) => changeFit(e.target.value as FitPolicy)}>
             <option value="page">페이지 설정 따름{session && fit === 'page' ? ` (${session.effectiveFit})` : ''}</option>
             <option value="cover">cover로 강제</option>
             <option value="auto">auto로 강제</option>
-          </select>
+          </Select>
         </label>
         <div className="spacer" />
-        <div className="tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={tab === 'live'} className={tab === 'live' ? 'on' : ''} onClick={() => setTab('live')}>
-            라이브
-          </button>
-          <button type="button" role="tab" aria-selected={tab === 'sheet'} className={tab === 'sheet' ? 'on' : ''} onClick={() => setTab('sheet')}>
-            비교 시트
-          </button>
-        </div>
+        <Button variant="ghost" size="sm" icon={Plus} onClick={() => setCustomOpen(true)}>
+          기기 만들기
+        </Button>
       </div>
 
       {tab === 'live' ? (
         <main className="workspace">
-          <section className="stage-col">
-            <div className="postures" role="radiogroup" aria-label="자세">
+          <section className={`stage${live || session?.loading ? '' : ' idle'}`} ref={stageRef}>
+            <div className="posture-bar" role="radiogroup" aria-label="자세">
               {device.postures.map((p) => (
                 <button
                   key={p.id}
@@ -446,52 +490,60 @@ export function App() {
                 </button>
               ))}
             </div>
-            <div className="stage" ref={stageRef}>
-              <LiveDevice
-                client={client}
-                device={device}
-                layout={layout}
-                url={session?.url ?? urlInput}
-                live={live}
-                analysis={liveAnalysis}
-                selectedId={selectedId}
-                numbering={numbering}
-                debug={debug}
-                toggles={toggles}
-                maxWidth={stage.w - 32}
-                maxHeight={stage.h - 24}
-                placeholder={session?.loading ? '불러오는 중…' : undefined}
-              />
-              {!live && (
+            <LiveDevice
+              client={client}
+              device={device}
+              layout={layout}
+              url={session?.url ?? urlInput}
+              live={live}
+              analysis={liveAnalysis}
+              selectedId={selectedId}
+              numbering={numbering}
+              debug={debug}
+              toggles={toggles}
+              maxWidth={stage.w}
+              maxHeight={stage.h}
+              placeholder={session?.loading ? '불러오는 중…' : undefined}
+            />
+            {live ? (
+              <div className="stage-dock">
+                <Switch checked={debug} onChange={setDebug}>
+                  디버그 표시
+                </Switch>
+                <span className="dock-sep" aria-hidden />
+                {OVERLAYS.map(([key, label, Icon]) => (
+                  <ToggleChip key={key} on={toggles[key]} icon={Icon} disabled={!debug} onClick={() => setToggles({ ...toggles, [key]: !toggles[key] })}>
+                    {label}
+                  </ToggleChip>
+                ))}
+                <span className="dock-sep readout-sep" aria-hidden />
+                <span className="readout" title={screenLabel}>
+                  {layout.viewport.w}×{layout.viewport.h} · DPR {layout.dpr}
+                </span>
+              </div>
+            ) : (
+              !session?.loading && (
                 <div className="welcome">
-                  <h1>주소를 넣으면 폴더블 화면 그대로 보여 드려요</h1>
-                  <p>접힘·펼침·반 접힘·화면 분할 자세를 실제 크롬 엔진으로 재현하고, 접는 선·카메라 홀·시스템 바에 걸린 요소를 찾아 줍니다.</p>
-                  <button type="button" className="primary" onClick={() => open(demoUrl)}>
-                    데모 페이지로 체험하기
-                  </button>
+                  <span className="welcome-icon">
+                    <MonitorSmartphone size={18} aria-hidden />
+                  </span>
+                  <div>
+                    <h1>주소를 열면 이 기기 화면 그대로 보여 드려요</h1>
+                    <p>
+                      접힘·펼침·반 접힘·화면 분할 자세를 실제 크롬 엔진으로 재현하고, 접는 선·카메라 홀·시스템 바에 걸린 요소를 찾아 줍니다.
+                    </p>
+                    <div className="welcome-actions">
+                      <Button variant="primary" size="sm" icon={Play} onClick={() => open(demoUrl)}>
+                        데모 페이지로 체험하기
+                      </Button>
+                      <span className="muted">
+                        {screenLabel} · {postureLabel(device, activePosture)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-              )}
-            </div>
-            <div className="toggles">
-              <label className="switch">
-                <input type="checkbox" checked={debug} onChange={(e) => setDebug(e.target.checked)} />
-                <span>디버그 표시</span>
-              </label>
-              {(
-                [
-                  ['zones', '접는 선·힌지'],
-                  ['safe', '안전 영역'],
-                  ['issues', '문제 위치'],
-                  ['segments', '세그먼트'],
-                ] as const
-              ).map(([key, label]) => (
-                <label key={key} className={`chip-toggle${debug ? '' : ' off'}`}>
-                  <input type="checkbox" checked={toggles[key]} disabled={!debug} onChange={(e) => setToggles({ ...toggles, [key]: e.target.checked })} />
-                  {label}
-                </label>
-              ))}
-              <span className="muted small">{device.screens.find((s) => s.id === device.postures.find((p) => p.id === activePosture)?.screen)?.label}</span>
-            </div>
+              )
+            )}
           </section>
           <IssuePanel
             analysis={liveAnalysis}
@@ -499,6 +551,7 @@ export function App() {
             support={session?.support ?? null}
             selectedId={selectedId}
             numbering={numbering}
+            postureName={postureLabel(device, activePosture)}
             onSelect={setSelectedId}
             onReveal={(ref) => client.send({ t: 'reveal', ref })}
             onReanalyze={() => client.send({ t: 'analyze' })}
@@ -506,76 +559,35 @@ export function App() {
           />
         </main>
       ) : (
-        <main className="sheet-page">
-          <section className="sheet-intro">
-            <span className="badge">비교 시트</span>
-            <h1>여러 자세를 기기 프레임째 한 장으로 캡처합니다</h1>
-            <p className="muted">
-              고른 자세를 차례로 바꿔 가며 같은 페이지를 캡처하고 자세별 문제 수를 함께 적습니다. PNG나 Markdown으로 PR·Jira에 그대로 붙이면 됩니다.
-              디버그 표시를 빼고 실제 화면만 찍을 수도 있습니다.
-            </p>
-          </section>
-          <section className="sheet-controls">
-            <div className="posture-checks">
-              {device.postures.map((p) => (
-                <label key={p.id} className="chip-toggle">
-                  <input
-                    type="checkbox"
-                    checked={sheetPostures.includes(p.id)}
-                    onChange={(e) =>
-                      setSheetPostures(e.target.checked ? [...sheetPostures, p.id] : sheetPostures.filter((id) => id !== p.id))
-                    }
-                  />
-                  {p.label}
-                </label>
-              ))}
-            </div>
-            <button type="button" className="primary" onClick={startCapture} disabled={!!progress || !live}>
-              {progress ? `캡처 중 ${progress.done}/${progress.total}` : `${sheetPostures.length}개 자세 캡처`}
-            </button>
-            {!live && <span className="muted small">라이브 탭에서 주소를 먼저 여세요.</span>}
-          </section>
-          {progress && (
-            <div className="progress">
-              <div style={{ width: `${(progress.done / Math.max(1, progress.total)) * 100}%` }} />
-              <span>
-                {postureLabel(device, progress.postureId)} 자세로 바꾸는 중… ({progress.done}/{progress.total})
-              </span>
-            </div>
-          )}
-          {capture && capture.deviceId === device.id ? (
-            <section className="sheet-card">
-              <div className="sheet-actions">
-                <label className="switch">
-                  <input type="checkbox" checked={sheetDebug} onChange={(e) => setSheetDebug(e.target.checked)} />
-                  <span>디버그 표시</span>
-                </label>
-                <div className="spacer" />
-                <button type="button" className="ghost" onClick={() => void exportPng(true)}>
-                  이미지 복사
-                </button>
-                <button type="button" className="ghost" onClick={() => void copyMarkdown()}>
-                  Markdown 복사
-                </button>
-                <button type="button" className="primary" onClick={() => void exportPng(false)}>
-                  PNG 저장
-                </button>
-              </div>
-              <div className="sheet-scroll">
-                <SheetView ref={sheetRef} result={capture} device={device} debug={sheetDebug} toggles={toggles} />
-              </div>
-            </section>
-          ) : (
-            !progress && <p className="muted sheet-empty">아직 캡처한 시트가 없습니다.</p>
-          )}
-        </main>
+        <SheetPage
+          device={device}
+          live={live}
+          selected={sheetPostures}
+          onSelectedChange={setSheetPostures}
+          progress={progress}
+          capture={capture}
+          debug={sheetDebug}
+          onDebugChange={setSheetDebug}
+          toggles={toggles}
+          sheetRef={sheetRef}
+          onCapture={startCapture}
+          onExportPng={(copy) => void exportPng(copy)}
+          onCopyMarkdown={() => void copyMarkdown()}
+          onGoLive={() => setTab('live')}
+        />
       )}
       {customOpen && <CustomDeviceDialog onSave={addCustomDevice} onClose={() => setCustomOpen(false)} />}
-      {toast && (
-        <div className="toast" role="status" onClick={() => setToast(null)}>
-          {toast}
-        </div>
-      )}
+      {toast && <ToastView toast={toast} onClose={() => setToast(null)} />}
+    </div>
+  );
+}
+
+function ToastView({ toast, onClose }: { toast: Toast; onClose: () => void }) {
+  const Icon = TOAST_ICON[toast.kind];
+  return (
+    <div className={`toast ${toast.kind}`} role={toast.kind === 'error' ? 'alert' : 'status'} onClick={onClose}>
+      <Icon size={16} aria-hidden />
+      <span>{toast.text}</span>
     </div>
   );
 }

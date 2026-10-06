@@ -49,41 +49,17 @@ export function DeviceDefs({ uid }: { uid: string }) {
   return (
     <defs>
       <pattern id={`${uid}-hatch-amber`} width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-        <rect width="7" height="7" fill="rgba(240,140,0,0.10)" />
-        <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(240,140,0,0.65)" strokeWidth="2" />
+        <rect width="7" height="7" fill="rgba(217,119,6,0.09)" />
+        <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(217,119,6,0.6)" strokeWidth="2" />
       </pattern>
       <pattern id={`${uid}-hatch-red`} width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
         <rect width="7" height="7" fill="rgba(229,72,77,0.12)" />
         <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(229,72,77,0.7)" strokeWidth="2" />
       </pattern>
       <pattern id={`${uid}-stripes`} width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-        <rect width="10" height="10" fill="#e6e8ec" />
-        <line x1="0" y1="0" x2="0" y2="10" stroke="#d9dce2" strokeWidth="4" />
+        <rect width="10" height="10" fill="#eceef2" />
+        <line x1="0" y1="0" x2="0" y2="10" stroke="#e0e3e8" strokeWidth="4" />
       </pattern>
-      <linearGradient id={`${uid}-crease-v`} x1="0" x2="1" y1="0" y2="0">
-        <stop offset="0" stopColor="#000" stopOpacity="0" />
-        <stop offset="0.42" stopColor="#000" stopOpacity="0.10" />
-        <stop offset="0.5" stopColor="#fff" stopOpacity="0.22" />
-        <stop offset="0.58" stopColor="#000" stopOpacity="0.10" />
-        <stop offset="1" stopColor="#000" stopOpacity="0" />
-      </linearGradient>
-      <linearGradient id={`${uid}-crease-h`} x1="0" x2="0" y1="0" y2="1">
-        <stop offset="0" stopColor="#000" stopOpacity="0" />
-        <stop offset="0.42" stopColor="#000" stopOpacity="0.10" />
-        <stop offset="0.5" stopColor="#fff" stopOpacity="0.22" />
-        <stop offset="0.58" stopColor="#000" stopOpacity="0.10" />
-        <stop offset="1" stopColor="#000" stopOpacity="0" />
-      </linearGradient>
-      <linearGradient id={`${uid}-fold-v`} x1="0" x2="1" y1="0" y2="0">
-        <stop offset="0" stopColor="#000" stopOpacity="0" />
-        <stop offset="0.5" stopColor="#000" stopOpacity="0.28" />
-        <stop offset="1" stopColor="#000" stopOpacity="0" />
-      </linearGradient>
-      <linearGradient id={`${uid}-fold-h`} x1="0" x2="0" y1="0" y2="1">
-        <stop offset="0" stopColor="#000" stopOpacity="0" />
-        <stop offset="0.5" stopColor="#000" stopOpacity="0.28" />
-        <stop offset="1" stopColor="#000" stopOpacity="0" />
-      </linearGradient>
     </defs>
   );
 }
@@ -220,7 +196,7 @@ export function DeviceBase({ device, layout, url, uid }: { device: DeviceSpec; l
             textAnchor="middle"
             dominantBaseline="central"
             fontSize={15}
-            fill="#8a9099"
+            fill="#98a2b3"
             fontFamily="Pretendard, 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif"
           >
             다른 앱
@@ -289,16 +265,23 @@ export function DeviceTop({
             </g>
           );
         }
-        const band = halfOpen ? 70 : 10;
-        return (
+        // 반 접힘이면 넓은 띠, 평평하면 얇은 주름 선(모두 단색)
+        const band = halfOpen ? 28 : 6;
+        const line = halfOpen ? 2 : 1;
+        const strip = (size: number, fill: string) => (
           <rect
-            key={i}
-            x={vertical ? f.at - band / 2 : 0}
-            y={vertical ? 0 : f.at - band / 2}
-            width={vertical ? band : screen.w}
-            height={vertical ? screen.h : band}
-            fill={`url(#${uid}-${halfOpen ? 'fold' : 'crease'}-${vertical ? 'v' : 'h'})`}
+            x={vertical ? f.at - size / 2 : 0}
+            y={vertical ? 0 : f.at - size / 2}
+            width={vertical ? size : screen.w}
+            height={vertical ? screen.h : size}
+            fill={fill}
           />
+        );
+        return (
+          <g key={i}>
+            {strip(band, halfOpen ? 'rgba(0,0,0,0.1)' : 'rgba(0,0,0,0.05)')}
+            {strip(line, halfOpen ? 'rgba(0,0,0,0.24)' : 'rgba(0,0,0,0.14)')}
+          </g>
         );
       })}
       <SplitHandle layout={layout} />
@@ -337,7 +320,7 @@ export interface OverlayToggles {
   segments: boolean;
 }
 
-function Chip({ x, y, text, color = '#111827', scale, anchor = 'start' }: { x: number; y: number; text: string; color?: string; scale: number; anchor?: 'start' | 'middle' | 'end' }) {
+function Chip({ x, y, text, color = '#101828', scale, anchor = 'start' }: { x: number; y: number; text: string; color?: string; scale: number; anchor?: 'start' | 'middle' | 'end' }) {
   const fs = 10.5 * scale;
   const w = (text.length * 6.1 + 10) * scale;
   const h = 16 * scale;
@@ -398,7 +381,7 @@ export function DebugOverlay({
             cy={r.y + r.h / 2}
             r={r.w / 2 + 6}
             fill={`url(#${uid}-hatch-amber)`}
-            stroke="rgba(240,140,0,0.9)"
+            stroke="rgba(217,119,6,0.85)"
             strokeWidth={1.2}
           />,
         );
@@ -412,7 +395,7 @@ export function DebugOverlay({
         parts.push(<path key={`ob-${o.id}`} d={d} fill={`url(#${uid}-hatch-amber)`} />);
       } else {
         parts.push(
-          <rect key={`ob-${o.id}`} x={r.x} y={r.y} width={r.w} height={r.h} fill={`url(#${uid}-hatch-amber)`} stroke="rgba(240,140,0,0.6)" strokeWidth={0.8} />,
+          <rect key={`ob-${o.id}`} x={r.x} y={r.y} width={r.w} height={r.h} fill={`url(#${uid}-hatch-amber)`} stroke="rgba(217,119,6,0.55)" strokeWidth={0.8} />,
         );
       }
     });
@@ -423,7 +406,7 @@ export function DebugOverlay({
       if (!raw) return;
       const got = env ? Math.round(env[edge]) : layout.insets[edge];
       const text = `${EDGE_LABEL[edge]} ${raw} · env ${got}`;
-      const color = got >= raw ? '#15803d' : '#b45309';
+      const color = got >= raw ? '#067647' : '#b45309';
       const pos =
         edge === 'top'
           ? { x: vp.x + vp.w - 8 * s, y: layout.window.y + raw + 4 * s, anchor: 'end' as const }
@@ -444,13 +427,13 @@ export function DebugOverlay({
       const red = f.gap > 0 || f.separating;
       parts.push(
         <g key={`fold-${i}`}>
-          <rect x={z.x} y={z.y} width={z.w} height={z.h} fill={red ? `url(#${uid}-hatch-red)` : 'rgba(240,140,0,0.10)'} />
-          <line {...line} stroke={red ? '#e5484d' : '#f08c00'} strokeWidth={1.2 * s} strokeDasharray={`${5 * s} ${4 * s}`} />
+          <rect x={z.x} y={z.y} width={z.w} height={z.h} fill={red ? `url(#${uid}-hatch-red)` : 'rgba(217,119,6,0.09)'} />
+          <line {...line} stroke={red ? '#e5484d' : '#d97706'} strokeWidth={1.2 * s} strokeDasharray={`${5 * s} ${4 * s}`} />
           <Chip
             x={vertical ? vp.x + f.at : vp.x + 8 * s}
             y={vertical ? vp.y + vp.h * 0.36 : vp.y + f.at - 22 * s}
             text={f.gap > 0 ? `힌지 ${f.gap}px` : f.separating ? '접는 선' : '주름'}
-            color={red ? '#c62828' : '#c2410c'}
+            color={red ? '#c3292e' : '#b45309'}
             scale={s}
             anchor={vertical ? 'middle' : 'start'}
           />
@@ -469,7 +452,7 @@ export function DebugOverlay({
             width={Math.max(0, seg.w - 6)}
             height={Math.max(0, seg.h - 6)}
             fill="none"
-            stroke="#3e7bfa"
+            stroke="#3b82f6"
             strokeWidth={1.4 * s}
             strokeDasharray={`${7 * s} ${5 * s}`}
           />

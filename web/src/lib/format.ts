@@ -2,8 +2,15 @@ import type { DeviceSpec, DisplayMode, Issue, Layout, Severity } from '../../../
 
 export const SEVERITY_COLOR: Record<Severity, string> = {
   high: '#e5484d',
-  warn: '#f08c00',
-  info: '#3e7bfa',
+  warn: '#d97706',
+  info: '#3b82f6',
+};
+
+/** 흰 바탕 위 옅은 칩에 쓰는 색(배경, 글자) */
+export const SEVERITY_TINT: Record<Severity, { bg: string; fg: string }> = {
+  high: { bg: '#fef1f1', fg: '#c3292e' },
+  warn: { bg: '#fff7e8', fg: '#a14f04' },
+  info: { bg: '#eff5ff', fg: '#1d4ed8' },
 };
 
 export const MODE_LABEL: Record<DisplayMode, string> = {

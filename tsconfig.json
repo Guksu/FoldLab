@@ -15,5 +15,5 @@
     "noImplicitOverride": true,
     "types": ["node"]
   },
-  "include": ["web/src", "server", "shared", "inpage", "tests", "vite.config.ts", "vitest.config.ts"]
+  "include": ["web/src", "server", "shared", "inpage", "tests", "scripts", "vite.config.ts", "vitest.config.ts"]
 }
