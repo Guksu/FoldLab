@@ -3,10 +3,19 @@
 폴더블·플립·듀얼 스크린 기기에서 웹사이트가 어떻게 보이는지 **자세별로 재현하고, 문제를 자동으로 찾아 주는 디버거**입니다.
 주소를 넣으면 실제 크롬 엔진(헤드리스 크로미움)으로 접힘·펼침·반 접힘·화면 분할 자세를 차례로 재현합니다.
 그리고 접는 선·힌지·카메라 홀·시스템 바에 걸린 요소를 기기 프레임 위에 표시합니다.
+내 PC에서 띄워 쓰는 로컬 도구라 `localhost` 개발 서버와 배포된 페이지를 모두 검사할 수 있습니다.
 
-![라이브 화면: 아이폰 듀오 펼침 자세와 문제 목록](docs/images/live.png)
+## 시연 영상
 
-![비교 시트: 접힘·펼침·분할 왼쪽·분할 오른쪽을 한 장으로](docs/images/sheet.png)
+![FoldLab 시연: 주소 입력 → 문제 확인 → 자세·기기 전환 → 비교 시트 캡처](docs/media/foldlab-demo.gif)
+
+주소를 넣어 데모 페이지를 열고, 문제를 눌러 위치를 확인하고, 기기 화면을 직접 스크롤합니다.
+이어서 아이폰 듀오의 접힘·분할·반 접힘 자세와 갤럭시 Z 플립8로 바꿔 보고, 비교 시트로 네 자세를 한 장에 캡처합니다.
+고화질 영상(1920×1200, MP4)은 [docs/media/foldlab-demo.mp4](docs/media/foldlab-demo.mp4)에 있습니다.
+
+| 라이브 화면 | 비교 시트 |
+|---|---|
+| ![라이브 화면: 아이폰 듀오 펼침 자세와 문제 목록](docs/images/live.png) | ![비교 시트: 접힘·펼침·분할 왼쪽·분할 오른쪽을 한 장으로](docs/images/sheet.png) |
 
 ## 무엇을 할 수 있나요
 
@@ -51,16 +60,16 @@ npm run dev        # http://localhost:5280 (UI) + http://127.0.0.1:4280 (서버)
 ```
 
 브라우저에서 <http://localhost:5280>을 열고 주소를 넣으세요. 바로 써 보려면 **데모 페이지로 체험하기**를 누르세요.
-`http://localhost:3000` 같은 로컬 개발 서버도 열 수 있습니다.
+`http://localhost:3000` 같은 로컬 개발 서버도, 배포된 사이트 주소도 열 수 있습니다.
 
-배포용으로 빌드해 한 포트로 띄우려면:
+개발 모드 대신 빌드해서 한 포트로 띄우려면:
 
 ```bash
 npm run build
 npm start          # http://127.0.0.1:4280
 ```
 
-`?url=…&device=iphone-duo&posture=unfolded&mode=app` 쿼리를 붙이면 그 설정으로 바로 엽니다. 팀에 링크로 공유할 때 편합니다.
+`?url=…&device=iphone-duo&posture=unfolded&mode=app` 쿼리를 붙이면 그 설정으로 바로 엽니다. 자주 보는 페이지를 북마크해 두면 편합니다.
 
 ## 사용 방법
 
@@ -128,19 +137,30 @@ npm start          # http://127.0.0.1:4280
 | `FOLDLAB_CHROMIUM_PATH` | | 쓸 크로미움 실행 파일. 없으면 Playwright 브라우저를 찾고, 버전이 안 맞으면 캐시에 있는 다른 리비전을 씁니다 |
 | `FOLDLAB_ALLOWED_ORIGINS` | | 웹소켓을 허용할 추가 출처(쉼표 구분). 기본은 같은 출처만 허용합니다 |
 
-## Docker
+## Docker로 실행하기
+
+Node.js를 설치하지 않고 띄우고 싶을 때 씁니다.
 
 ```bash
 docker build -t foldlab .
-docker run --rm -p 4280:4280 foldlab                                # 공개 주소만 열 수 있음
-docker run --rm -p 4280:4280 -e FOLDLAB_ALLOW_PRIVATE=1 foldlab     # 사내 스테이징 등 사설망 허용
+docker run --rm -p 127.0.0.1:4280:4280 foldlab     # http://localhost:4280
+```
+
+컨테이너 안의 `localhost`는 내 PC가 아닙니다. 내 PC의 개발 서버를 열려면 사설망을 허용하고 `host.docker.internal`로 접속하세요.
+리눅스에서는 `--add-host=host.docker.internal:host-gateway`도 붙여야 합니다.
+
+```bash
+docker run --rm -p 127.0.0.1:4280:4280 -e FOLDLAB_ALLOW_PRIVATE=1 \
+  --add-host=host.docker.internal:host-gateway foldlab
+# 주소 입력: http://host.docker.internal:3000
 ```
 
 이미지에는 한글 글꼴(Noto CJK)이 들어 있어 캡처의 한글이 깨지지 않습니다.
 
 ## 보안
 
-- 서버는 사용자가 넣은 주소를 대신 엽니다. 외부에 공개할 때는 `FOLDLAB_ALLOW_PRIVATE=0`(기본값)으로 사설망·클라우드 메타데이터 주소 요청을 막으세요. 단, 페이지 안 웹소켓 연결과 DNS 리바인딩까지 완벽히 막지는 못하므로 격리된 네트워크에 두는 것을 권합니다.
+- FoldLab은 내 PC에서 쓰는 **로컬 도구**입니다. 서버가 사용자가 넣은 주소를 대신 열기 때문에 인터넷에 공개하지 마세요. 기본 설정은 `127.0.0.1`에만 열립니다.
+- 루프백이 아닌 주소에 열면 `FOLDLAB_ALLOW_PRIVATE`가 꺼져 사설망·클라우드 메타데이터 주소 요청을 막습니다. 단, 페이지 안 웹소켓 연결과 DNS 리바인딩까지 완벽히 막지는 못합니다.
 - 다른 사이트가 사용자 몰래 로컬 FoldLab에 접속해 브라우저를 조종하지 못하게 웹소켓 `Origin`을 확인합니다.
 - 페이지의 `confirm()`은 취소로 처리해 삭제 같은 동작이 실수로 실행되지 않게 합니다. `alert()`는 확인을 누르고 UI에 알려 줍니다.
 
@@ -158,6 +178,18 @@ npm run dev         # 서버(tsx watch) + UI(vite)
 npm run typecheck   # tsc --noEmit
 npm test            # 단위 테스트(기하) + 통합 테스트(실제 크로미움으로 데모 페이지 검사)
 npm run smoke       # 서버가 떠 있을 때 웹소켓으로 열기·분석·캡처 점검
+npm run record:demo # 서버가 떠 있을 때 시연 영상(docs/media) 다시 만들기, ffmpeg 필요
 ```
 
+시연 영상은 `scripts/record-demo.ts`가 실제 UI를 자동으로 조작하며 녹화합니다. UI를 바꾼 뒤 다시 실행하면 README 영상도 함께 갱신됩니다.
+
 데모 페이지 `server/demo/trip.html`에는 일부러 문제를 넣었습니다(안전 영역 무시, 접는 선 위 버튼, 고정 폭 배너, 작은 아이콘 버튼). `?fixed`를 붙이면 `env(safe-area-inset-*)`와 viewport segments로 고친 버전이 됩니다.
+
+## 앞으로 할 일
+
+- [ ] iPhone Duo 실측 보정: 실기기·Xcode 시뮬레이터에서 화면 크기·안전 영역을 재는 `/measure` 페이지를 만들고 카탈로그에 반영 (10월 23일 출시 후)
+- [ ] 아이폰 기기용 WebKit 렌더링 엔진(Playwright WebKit)
+- [ ] 페이지 전체 검사와 폭 스윕("몇 px부터 깨지는지")
+- [ ] 가상 키보드와 줄었다 늘어나는 주소창(동적 툴바) 재현
+- [ ] 삼성 인터넷·네이버 웨일 프로필
+- [ ] 타입 검사·테스트 CI

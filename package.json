@@ -17,7 +17,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "browsers": "playwright install chromium",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "record:demo": "tsx scripts/record-demo.ts"
   },
   "dependencies": {
     "esbuild": "^0.28.2",
