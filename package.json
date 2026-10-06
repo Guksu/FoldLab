@@ -16,7 +16,8 @@
     "start": "node dist/server/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "browsers": "playwright install chromium"
+    "browsers": "playwright install chromium",
+    "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
     "esbuild": "^0.28.2",
