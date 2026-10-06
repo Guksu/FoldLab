@@ -63,13 +63,25 @@ export function installSafeAreaShim(): void {
     applyVars();
   };
 
-  const needs = (text: string | null) => !!text && text.indexOf('safe-area-inset') !== -1 && text.indexOf(VAR_PREFIX) === -1;
+  /** 바꿀 식이 남아 있으면 바꾼 글을, 없으면 null을 돌려준다. 이미 바꾼 부분은 그대로 두므로 섞여 있어도 된다. */
+  const rewrite = (text: string | null): string | null => {
+    if (!text || text.indexOf('safe-area-inset') === -1) return null;
+    const next = rewriteSafeArea(text);
+    return next === text ? null : next;
+  };
+  // <style>은 글 조각(텍스트 노드)마다 바꾼다. CSS-in-JS가 조각을 덧붙여 가거나 쥐고 있는 조각을 고쳐 써도 깨지지 않는다.
+  const fixText = (node: Node) => {
+    const next = rewrite(node.nodeValue);
+    if (next !== null) node.nodeValue = next;
+  };
   const fixStyle = (el: Element) => {
-    if (needs(el.textContent)) el.textContent = rewriteSafeArea(el.textContent!);
+    el.childNodes.forEach((n) => {
+      if (n.nodeType === 3) fixText(n);
+    });
   };
   const fixInline = (el: Element) => {
-    const s = el.getAttribute('style');
-    if (needs(s)) el.setAttribute('style', rewriteSafeArea(s!));
+    const next = rewrite(el.getAttribute('style'));
+    if (next !== null) el.setAttribute('style', next);
   };
   const scan = (root: ParentNode) => {
     root.querySelectorAll('style').forEach(fixStyle);
@@ -82,12 +94,12 @@ export function installSafeAreaShim(): void {
           fixInline(r.target as Element);
         } else if (r.type === 'characterData') {
           const p = r.target.parentNode;
-          if (p && p.nodeName === 'STYLE') fixStyle(p as Element);
+          if (p && p.nodeName === 'STYLE') fixText(r.target);
         } else {
           r.addedNodes.forEach((n) => {
             if (n.nodeType === 3) {
               const p = n.parentNode;
-              if (p && p.nodeName === 'STYLE') fixStyle(p as Element);
+              if (p && p.nodeName === 'STYLE') fixText(n);
             } else if (n.nodeType === 1) {
               const el = n as Element;
               if (el.nodeName === 'STYLE') fixStyle(el);

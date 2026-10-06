@@ -4,6 +4,7 @@ import { computeLayout, findPosture, parseViewportFit, resolveFit } from '../sha
 import type { CaptureItem, CaptureResult, Engine, FrameHeader, ServerMessage, SessionState } from '../shared/protocol';
 import { RULES } from '../shared/rules';
 import type { Analysis, DeviceSpec, DisplayMode, FitPolicy, Issue, Layout, Severity, ViewportFit } from '../shared/types';
+import { webkitInstalled } from './browser';
 import { config } from './config';
 import { ChromiumDriver } from './engines/chromium';
 import type { DriverHooks, EngineDriver, TouchPhase } from './engines/types';
@@ -25,6 +26,11 @@ export interface SessionOptions {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** WebKit이 없는 서버면 크로미움으로 그린다(UI는 서버 정보를 받기 전에도 고른 엔진을 보낸다) */
+function usableEngine(engine: Engine): Engine {
+  return engine === 'webkit' && !webkitInstalled() ? 'chromium' : engine;
+}
 
 /**
  * 웹소켓 연결 하나에 대응하는 헤드리스 페이지.
@@ -60,7 +66,7 @@ export class LiveSession {
     this.postureId = findPosture(opts.device, opts.postureId).id;
     this.mode = opts.mode;
     this.fit = opts.fit;
-    this.driver = this.createDriver(opts.engine ?? 'chromium');
+    this.driver = this.createDriver(usableEngine(opts.engine ?? 'chromium'));
   }
 
   get busy(): boolean {
@@ -117,8 +123,21 @@ export class LiveSession {
 
   async start(): Promise<void> {
     this.layout = this.computeLayout();
-    await this.driver.start(this.device, this.layout);
+    await this.startDriver();
     await this.pushState();
+  }
+
+  /** 드라이버를 띄운다. WebKit을 띄우지 못하면 크로미움으로 대신 그리고 이유를 알린다. */
+  private async startDriver(): Promise<void> {
+    try {
+      await this.driver.start(this.device, this.layout);
+    } catch (err) {
+      if (this.driver.engine === 'chromium' || this.closed) throw err;
+      await this.driver.close().catch(() => {});
+      this.sink.json({ t: 'error', message: `WebKit 대신 크로미움으로 그립니다. ${String((err as Error)?.message ?? err)}` });
+      this.driver = this.createDriver('chromium');
+      await this.driver.start(this.device, this.layout);
+    }
   }
 
   // ---------- 설정 ----------
@@ -131,8 +150,9 @@ export class LiveSession {
     if (next.postureId || next.device) this.postureId = findPosture(this.device, next.postureId ?? this.postureId).id;
     if (next.mode) this.mode = next.mode;
     if (next.fit) this.fit = next.fit;
-    if (next.engine && next.engine !== this.driver.engine) {
-      await this.switchEngine(next.engine);
+    const engine = next.engine && usableEngine(next.engine);
+    if (engine && engine !== this.driver.engine) {
+      await this.switchEngine(engine);
       return;
     }
     // 같은 기기에서 자세만 바꾸면 실제 기기처럼 상태가 이어지는지 함께 본다
@@ -162,7 +182,7 @@ export class LiveSession {
     this.pageFit = 'auto';
     await old.close().catch(() => {});
     this.layout = this.computeLayout();
-    await this.driver.start(this.device, this.layout);
+    await this.startDriver();
     await this.pushState();
     if (url.startsWith('http')) await this.navigate(url);
   }

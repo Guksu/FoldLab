@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { rewriteSafeArea } from '../inpage/safearea';
 
 describe('WebKit 안전 영역 CSS 바꾸기', () => {
@@ -36,14 +36,23 @@ describe('WebKit 안전 영역 CSS 바꾸기', () => {
 });
 
 describe('페이지 안 안전 영역 흉내(크로미움에서 동작 확인)', () => {
-  it('style·style 속성·CSSOM·섀도 DOM의 env()를 바꾸고 값을 바꿀 수 있다', async () => {
+  afterAll(async () => {
+    const { closeBrowser } = await import('../server/browser');
+    await closeBrowser();
+  });
+
+  /** 흉내 스크립트를 문서 시작 때 심은 새 페이지를 연다 */
+  async function shimPage() {
     const { getSafeAreaShimSource } = await import('../server/inpage');
-    const { getBrowser, closeBrowser } = await import('../server/browser');
-    const browser = await getBrowser();
-    const context = await browser.newContext();
+    const { getBrowser } = await import('../server/browser');
+    const context = await (await getBrowser()).newContext();
+    await context.addInitScript({ content: await getSafeAreaShimSource() });
+    return { context, page: await context.newPage() };
+  }
+
+  it('style·style 속성·CSSOM·섀도 DOM의 env()를 바꾸고 값을 바꿀 수 있다', async () => {
+    const { context, page } = await shimPage();
     try {
-      await context.addInitScript({ content: await getSafeAreaShimSource() });
-      const page = await context.newPage();
       await page.setContent(`
         <style>#a{padding-top:env(safe-area-inset-top)}</style>
         <div id="a"></div>
@@ -74,7 +83,34 @@ describe('페이지 안 안전 영역 흉내(크로미움에서 동작 확인)',
       expect(await read()).toEqual({ a: 47, b: 34, c: 12, d: 10, shadow: 47 });
     } finally {
       await context.close();
-      await closeBrowser();
+    }
+  });
+
+  it('이미 바꾼 <style>에 덧붙인 CSS 조각도 바꾸고, 라이브러리가 쥔 조각은 그대로 둔다', async () => {
+    const { context, page } = await shimPage();
+    try {
+      await page.setContent('<div id="e"></div><div id="f"></div>');
+      // styled-components 개발 모드처럼 <style> 하나에 규칙마다 글 조각(텍스트 노드)을 덧붙인다
+      const kept = await page.evaluate(async () => {
+        const tick = () => new Promise((r) => setTimeout(r, 0));
+        const style = document.createElement('style');
+        const first = document.createTextNode('#e{padding-top:env(safe-area-inset-top)}');
+        style.appendChild(first);
+        document.head.appendChild(style);
+        await tick();
+        style.appendChild(document.createTextNode('#f{padding-bottom:env(safe-area-inset-bottom)}'));
+        await tick();
+        (window as any).__foldlabSafeArea.set({ top: 47, right: 0, bottom: 34, left: 0 });
+        return first.parentNode === style;
+      });
+      expect(kept).toBe(true);
+      const px = await page.evaluate(() => {
+        const get = (id: string, prop: string) => parseFloat(getComputedStyle(document.getElementById(id)!).getPropertyValue(prop));
+        return { e: get('e', 'padding-top'), f: get('f', 'padding-bottom') };
+      });
+      expect(px).toEqual({ e: 47, f: 34 });
+    } finally {
+      await context.close();
     }
   });
 });

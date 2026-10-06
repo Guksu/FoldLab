@@ -190,10 +190,13 @@ export function App() {
     }
   }, [urlInput, deviceId, validPosture, mode, fit, toggles, debug, iosEngine]);
 
-  /** 아이폰 기기는 WebKit이 설치돼 있고 사용자가 고르면 사파리 엔진으로 그린다 */
+  /**
+   * 아이폰 기기는 사용자가 고르면 사파리 엔진으로 그린다.
+   * 서버 정보(hello)를 받기 전에 열어도 같은 엔진이 되도록 고른 값을 그대로 보내고, WebKit이 없으면 서버가 크로미움으로 그린다.
+   */
   const engineFor = useCallback(
-    (d: DeviceSpec, pref: Engine = iosEngine): Engine => (d.platform === 'ios' && webkitAvailable && pref === 'webkit' ? 'webkit' : 'chromium'),
-    [iosEngine, webkitAvailable],
+    (d: DeviceSpec, pref: Engine = iosEngine): Engine => (d.platform === 'ios' && pref === 'webkit' ? 'webkit' : 'chromium'),
+    [iosEngine],
   );
 
   useEffect(() => {
@@ -521,7 +524,7 @@ export function App() {
               <span className="field-label">엔진</span>
               <Segmented<Engine>
                 label="렌더링 엔진"
-                value={engineFor(device)}
+                value={webkitAvailable ? engineFor(device) : 'chromium'}
                 onChange={changeEngine}
                 options={[
                   { value: 'chromium', label: '크로미움', hint: '크로미움에 아이폰 화면 크기·UA·안전 영역만 흉내 냅니다' },
