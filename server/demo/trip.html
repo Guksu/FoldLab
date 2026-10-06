@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>여정 예약 — FoldLab 데모</title>
+<style>
+  :root {
+    --blue: #1a73e8;
+    --ink: #17202c;
+    --muted: #677285;
+    --bg: #f3f5f8;
+    --card: #ffffff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: var(--bg); }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+
+  /* ---------- 상단 바 ---------- */
+  .top {
+    position: fixed; inset: 0 0 auto 0; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 52px; padding: 0 12px;
+    background: rgba(255,255,255,.94); backdrop-filter: blur(8px);
+    border-bottom: 1px solid #e3e7ee;
+  }
+  .top h1 { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; font-size: 16px; font-weight: 700; }
+  .top .close { color: var(--blue); font-size: 15px; padding: 6px 2px; }
+  .top .actions { display: flex; align-items: center; gap: 6px; }
+  .top .actions button {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #e8f0fe; color: var(--blue); font-size: 12px; font-weight: 700;
+  }
+
+  main { padding: 68px 16px 120px; }
+
+  .hero {
+    padding: 22px 20px; border-radius: 18px; color: #fff;
+    background: linear-gradient(135deg, #2f7cf6, #1a5fd8 60%, #1b4fc2);
+    box-shadow: 0 10px 24px rgba(26,95,216,.25);
+  }
+  .hero h2 { margin: 0 0 6px; font-size: 21px; }
+  .hero p { margin: 0; font-size: 13px; opacity: .9; }
+
+  .promo {
+    min-width: 380px; margin-top: 14px; padding: 12px 16px; border-radius: 12px;
+    background: #fff7e6; color: #8a5300; font-size: 13px; white-space: nowrap;
+  }
+
+  .places { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+  .place {
+    display: block; text-align: left; padding: 14px; border-radius: 14px; background: var(--card);
+    box-shadow: 0 1px 2px rgba(20,30,50,.06);
+  }
+  .place b { display: block; font-size: 14px; margin-bottom: 4px; }
+  .place span { font-size: 12px; color: var(--muted); }
+
+  .more {
+    display: block; margin: 18px auto 0; padding: 10px 18px; border-radius: 999px;
+    background: #fff; font-size: 13px; box-shadow: 0 1px 2px rgba(20,30,50,.08);
+  }
+
+  .notice { margin-top: 22px; font-size: 13px; line-height: 1.7; color: var(--muted); }
+
+  /* ---------- 하단 고정 바 ---------- */
+  .bottom {
+    position: fixed; inset: auto 0 0 0; z-index: 10;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 12px;
+    background: rgba(255,255,255,.96); border-top: 1px solid #e3e7ee;
+  }
+  .bottom button { height: 48px; border-radius: 12px; font-weight: 700; font-size: 15px; }
+  .bottom .secondary { background: #eef1f5; }
+  .bottom .primary { background: var(--blue); color: #fff; }
+
+  /* ---------- 대화상자 ---------- */
+  .dialog {
+    position: fixed; z-index: 20; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(360px, calc(100vw - 32px)); padding: 20px; border-radius: 18px; background: #fff;
+    box-shadow: 0 20px 60px rgba(10,20,40,.3);
+  }
+  .dialog[hidden] { display: none; }
+  .dialog h3 { margin: 0 0 8px; }
+  .dialog ul { margin: 0 0 14px; padding-left: 18px; font-size: 14px; line-height: 1.8; }
+  .dialog button { width: 100%; height: 44px; border-radius: 12px; background: var(--blue); color: #fff; font-weight: 700; }
+  .scrim { position: fixed; inset: 0; z-index: 15; background: rgba(10,20,40,.35); }
+  .scrim[hidden] { display: none; }
+
+</style>
+<template id="fixed-css"><style>
+  /* ================================================================
+     ?fixed : 안전 영역과 접는 선을 고려한 버전
+     ================================================================ */
+  .fixed .top { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left)); }
+  .fixed .top .actions button { width: 40px; height: 40px; }
+  .fixed main { padding: calc(68px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(120px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+  .fixed .promo { min-width: 0; white-space: normal; }
+  .fixed .bottom { padding-bottom: calc(10px + env(safe-area-inset-bottom)); padding-left: calc(12px + env(safe-area-inset-left)); padding-right: calc(12px + env(safe-area-inset-right)); }
+  .fixed .notice { max-width: 40em; }
+
+  /* 넓은 화면: 두 열, 가운데(주름 자리)를 비운다 */
+  @media (min-width: 600px) {
+    .fixed main { display: grid; grid-template-columns: 1fr 1fr; column-gap: 48px; align-content: start; align-items: start; }
+    .fixed .hero, .fixed .promo { grid-column: 1; }
+    .fixed .places { grid-column: 2; grid-row: 1 / span 3; margin-top: 0; grid-template-columns: 1fr; }
+    .fixed .more { grid-column: 1; margin-left: 0; }
+    .fixed .notice { grid-column: 1; }
+    .fixed .bottom { grid-template-columns: 1fr 1fr; column-gap: 48px; }
+  }
+
+  /* 두 세그먼트(반 접힘·듀얼 스크린): 접는 선 폭만큼 정확히 띄운다 */
+  @media (horizontal-viewport-segments: 2) {
+    .fixed main {
+      grid-template-columns: env(viewport-segment-width 0 0) env(viewport-segment-width 1 0);
+      column-gap: calc(env(viewport-segment-left 1 0) - env(viewport-segment-right 0 0));
+      padding-left: 0; padding-right: 0;
+    }
+    .fixed main > * { margin-left: 16px; margin-right: 16px; }
+    .fixed .bottom {
+      grid-template-columns: env(viewport-segment-width 0 0) env(viewport-segment-width 1 0);
+      column-gap: calc(env(viewport-segment-left 1 0) - env(viewport-segment-right 0 0));
+      padding-left: 0; padding-right: 0;
+    }
+    .fixed .bottom button { margin: 0 12px; }
+    .fixed .dialog { left: calc(env(viewport-segment-left 1 0) + env(viewport-segment-width 1 0) / 2); }
+  }
+  @media (vertical-viewport-segments: 2) {
+    .fixed main { padding-top: calc(env(viewport-segment-top 1 0) + 16px); }
+    .fixed .dialog { top: calc(env(viewport-segment-top 0 0) + env(viewport-segment-height 0 0) / 2); }
+  }
+</style></template>
+<script>
+  // ?fixed 를 붙이면 문제를 고친 버전이 된다(고친 CSS는 이때만 넣는다)
+  if (new URLSearchParams(location.search).has('fixed')) {
+    document.documentElement.classList.add('fixed');
+    document.head.append(document.getElementById('fixed-css').content.cloneNode(true));
+  }
+</script>
+</head>
+<body>
+  <header class="top">
+    <button class="close" type="button">닫기</button>
+    <h1>여정 예약</h1>
+    <div class="actions">
+      <button type="button" aria-label="공유">⇪</button>
+      <button type="button" aria-label="도움말">?</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h2>오늘 어디로 갈까요?</h2>
+      <p>출발지와 도착지를 고르면 예상 요금을 알려드려요.</p>
+    </section>
+
+    <div class="promo">🎟 첫 예약이면 왕복 요금 20% 할인 쿠폰을 바로 드려요 · 자세히 보기</div>
+
+    <section class="places" aria-label="자주 가는 장소">
+      <button class="place" type="button"><b>집</b><span>서울 성동구 왕십리로</span></button>
+      <button class="place" type="button"><b>회사</b><span>경기 성남시 분당구</span></button>
+      <button class="place" type="button"><b>공항</b><span>인천국제공항 제1여객터미널</span></button>
+      <button class="place" type="button"><b>최근 장소</b><span>서울역 서부</span></button>
+    </section>
+
+    <button class="more" type="button" id="more">장소 더 보기</button>
+
+    <p class="notice">
+      예상 요금은 실시간 교통 상황, 심야 할증, 통행료에 따라 달라질 수 있으며 실제 결제 금액은 도착 후 확정됩니다.
+      예약을 취소하면 출발 10분 전까지는 수수료가 없고, 그 이후에는 기본요금의 50%가 부과됩니다. 반려동물과 함께 타거나
+      큰 짐이 있다면 요청 사항에 미리 적어 주세요. 기사님이 확인하고 알맞은 차량을 배정해 드립니다.
+    </p>
+  </main>
+
+  <div class="scrim" id="scrim" hidden></div>
+  <div class="dialog" id="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title" hidden>
+    <h3 id="dlg-title">저장한 장소</h3>
+    <ul>
+      <li>판교역 1번 출구</li>
+      <li>잠실 롯데월드몰</li>
+      <li>김포공항 국내선</li>
+    </ul>
+    <button type="button" id="close-dialog">닫기</button>
+  </div>
+
+  <nav class="bottom">
+    <button class="secondary" type="button">예약 내역</button>
+    <button class="primary" type="button">출발지 설정</button>
+  </nav>
+
+  <script>
+    const dialog = document.getElementById('dialog');
+    const scrim = document.getElementById('scrim');
+    const toggle = (open) => { dialog.hidden = !open; scrim.hidden = !open; };
+    document.getElementById('more').addEventListener('click', () => toggle(true));
+    document.getElementById('close-dialog').addEventListener('click', () => toggle(false));
+    scrim.addEventListener('click', () => toggle(false));
+    if (new URLSearchParams(location.search).has('dialog')) toggle(true);
+  </script>
+</body>
+</html>
