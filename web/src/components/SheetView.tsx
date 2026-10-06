@@ -2,14 +2,16 @@ import { forwardRef } from 'react';
 import { SEVERITY_LABEL, SEVERITY_ORDER } from '../../../shared/rules';
 import type { CaptureResult } from '../../../shared/protocol';
 import type { DeviceSpec } from '../../../shared/types';
-import { MODE_LABEL, SEVERITY_COLOR, formatTime, postureLabel } from '../lib/format';
+import { MODE_LABEL, SEVERITY_COLOR, SEVERITY_TINT, formatTime, postureLabel } from '../lib/format';
 import { DebugOverlay, DeviceBase, DeviceDefs, DeviceTop, frameBox, type OverlayToggles } from './DeviceArt';
 
-const FONT = "Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', 'Noto Sans CJK KR', system-ui, sans-serif";
-const PAD = 36;
-const GAP = 44;
-const HEADER = 92;
-const CAPTION = 66;
+// PNG로 내보낼 때는 웹 글꼴을 못 쓰므로 시스템 한글 글꼴을 뒤에 둔다
+const FONT = "'Pretendard Variable', Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', 'Noto Sans CJK KR', system-ui, sans-serif";
+const MONO = `'SF Mono', SFMono-Regular, ui-monospace, Menlo, Consolas, ${FONT}`;
+const PAD = 40;
+const GAP = 48;
+const HEADER = 104;
+const CAPTION = 72;
 const FRAME_HEIGHT = 520;
 
 interface Props {
@@ -32,9 +34,11 @@ export const SheetView = forwardRef<SVGSVGElement, Props>(function SheetView({ r
     x += w + GAP;
     return out;
   });
-  const width = Math.max(560, x - GAP + PAD);
+  const width = Math.max(600, x - GAP + PAD);
   const bodyH = Math.max(...placed.map((p) => p.h));
-  const height = HEADER + bodyH + CAPTION + PAD;
+  const height = HEADER + bodyH + CAPTION + PAD - 8;
+  const totals = SEVERITY_ORDER.map((s) => ({ s, n: result.items.reduce((sum, it) => sum + it.analysis.counts[s], 0) }));
+  const url = result.url.length > 90 ? result.url.slice(0, 89) + '…' : result.url;
 
   return (
     <svg
@@ -46,23 +50,53 @@ export const SheetView = forwardRef<SVGSVGElement, Props>(function SheetView({ r
       className="sheet-svg"
       fontFamily={FONT}
     >
-      <rect width={width} height={height} rx={18} fill="#fbfaf7" />
-      <rect x={0.5} y={0.5} width={width - 1} height={height - 1} rx={18} fill="none" stroke="#e5e0d5" />
-      <text x={PAD} y={42} fontSize={20} fontWeight={800} fill="#1f2329">
-        {device.name} · FoldLab 비교 시트
+      <rect width={width} height={height} rx={16} fill="#ffffff" />
+      <rect x={0.5} y={0.5} width={width - 1} height={height - 1} rx={16} fill="none" stroke="#e4e7ec" />
+
+      {/* 머리말: 로고, 기기 이름, 주소·시각, 전체 문제 수 */}
+      <g transform={`translate(${PAD} 30)`}>
+        <rect x={0} y={4} width={8.5} height={15} rx={2.2} fill="#101828" />
+        <path d="M10.5 5.2c0-.45.3-.85.73-.98l6.2-1.86A1.2 1.2 0 0 1 19 3.5v16a1.2 1.2 0 0 1-1.57 1.14l-6.2-1.86a1.03 1.03 0 0 1-.73-.98z" fill="#4f46e5" />
+        <text x={30} y={12} dominantBaseline="central" fontSize={13} fontWeight={600} fill="#667085">
+          FoldLab 비교 시트
+        </text>
+      </g>
+      <text x={PAD} y={76} fontSize={21} fontWeight={700} fill="#101828" letterSpacing="-0.02em">
+        {device.name}
       </text>
-      <text x={PAD} y={66} fontSize={12.5} fill="#6b7280" fontFamily={`ui-monospace, SFMono-Regular, Menlo, Consolas, ${FONT}`}>
-        {result.url.length > 90 ? result.url.slice(0, 89) + '…' : result.url} · {formatTime(result.at)} · {MODE_LABEL[result.mode]}
+      <text x={PAD} y={HEADER - 4} fontSize={12} fill="#667085" fontFamily={MONO}>
+        {url} · {formatTime(result.at)} · {MODE_LABEL[result.mode]}
         {debug ? '' : ' · 디버그 표시 없음'}
       </text>
-      <rect x={PAD} y={76} width={40} height={3} rx={1.5} fill="#e5484d" />
+      {(() => {
+        // 오른쪽 위: 모든 자세의 문제 수 합계
+        let rx = width - PAD;
+        return [...totals].reverse().map(({ s, n }) => {
+          const label = `${SEVERITY_LABEL[s]} ${n}`;
+          const cw = label.length * 8 + 30;
+          rx -= cw;
+          const cx = rx;
+          rx -= 6;
+          return (
+            <g key={s}>
+              <rect x={cx} y={56} width={cw} height={26} rx={7} fill={n ? SEVERITY_TINT[s].bg : '#f2f4f7'} />
+              <circle cx={cx + 13} cy={69} r={3.5} fill={n ? SEVERITY_COLOR[s] : '#c0c7d2'} />
+              <text x={cx + 22} y={69.5} dominantBaseline="central" fontSize={12.5} fontWeight={600} fill={n ? SEVERITY_TINT[s].fg : '#98a2b3'}>
+                {label}
+              </text>
+            </g>
+          );
+        });
+      })()}
+      <line x1={PAD} x2={width - PAD} y1={HEADER + 14} y2={HEADER + 14} stroke="#eef0f3" />
 
       {placed.map(({ item, box, x: fx, h }, i) => {
         const uid = `sheet${i}`;
         const vp = item.layout.viewport;
-        const y = HEADER + (bodyH - h);
+        const y = HEADER + 28 + (bodyH - h);
         const counts = item.analysis.counts;
         const chips = SEVERITY_ORDER.filter((s) => counts[s] > 0);
+        const capY = HEADER + 28 + bodyH;
         let cx = fx;
         return (
           <g key={item.postureId}>
@@ -83,27 +117,28 @@ export const SheetView = forwardRef<SVGSVGElement, Props>(function SheetView({ r
                 />
               )}
             </g>
-            <text x={fx} y={HEADER + bodyH + 26} fontSize={14} fontWeight={700} fill="#1f2329">
+            <text x={fx} y={capY + 26} fontSize={14} fontWeight={600} fill="#101828">
               {postureLabel(device, item.postureId)}
-              <tspan dx={8} fontSize={11.5} fontWeight={400} fill="#8b909a">
+              <tspan dx={8} fontSize={11.5} fontWeight={400} fill="#98a2b3" fontFamily={MONO}>
                 {vp.w}×{vp.h}
               </tspan>
             </text>
             {chips.length === 0 ? (
               <g>
-                <rect x={fx} y={HEADER + bodyH + 36} width={64} height={20} rx={5} fill="#e8f6ec" />
-                <text x={fx + 32} y={HEADER + bodyH + 46.5} textAnchor="middle" dominantBaseline="central" fontSize={11.5} fontWeight={700} fill="#1c7c3a">
+                <rect x={fx} y={capY + 38} width={68} height={22} rx={6} fill="#ecfdf3" />
+                <text x={fx + 34} y={capY + 49.5} textAnchor="middle" dominantBaseline="central" fontSize={11.5} fontWeight={600} fill="#067647">
                   문제 없음
                 </text>
               </g>
             ) : (
               chips.map((s) => {
                 const label = `${SEVERITY_LABEL[s]} ${counts[s]}`;
-                const cw = label.length * 8.5 + 14;
+                const cw = label.length * 8 + 26;
                 const node = (
                   <g key={s}>
-                    <rect x={cx} y={HEADER + bodyH + 36} width={cw} height={20} rx={5} fill={SEVERITY_COLOR[s]} />
-                    <text x={cx + cw / 2} y={HEADER + bodyH + 46.5} textAnchor="middle" dominantBaseline="central" fontSize={11.5} fontWeight={700} fill="#fff">
+                    <rect x={cx} y={capY + 38} width={cw} height={22} rx={6} fill={SEVERITY_TINT[s].bg} />
+                    <circle cx={cx + 11} cy={capY + 49} r={3} fill={SEVERITY_COLOR[s]} />
+                    <text x={cx + 19} y={capY + 49.5} dominantBaseline="central" fontSize={11.5} fontWeight={600} fill={SEVERITY_TINT[s].fg}>
                       {label}
                     </text>
                   </g>

@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { Globe } from 'lucide-react';
 import type { Analysis, DeviceSpec, Issue, Layout } from '../../../shared/types';
 import { shiftRects } from '../lib/format';
 import type { FoldLabClient } from '../lib/session';
@@ -162,7 +163,8 @@ export function LiveDevice(props: Props) {
       <canvas ref={canvasRef} className="screen" style={{ ...vpStyle, opacity: live && hasFrame ? 1 : 0 }} />
       {(!live || !hasFrame) && (
         <div className="screen-placeholder" style={vpStyle}>
-          <span>{props.placeholder ?? '주소를 열면 여기에 화면이 나타납니다'}</span>
+          {live || props.placeholder ? <span className="spinner" aria-hidden /> : <Globe size={24} aria-hidden />}
+          <span>{props.placeholder ?? (live ? '화면을 받는 중…' : '주소를 열면 여기에 화면이 나타납니다')}</span>
         </div>
       )}
       <svg className="layer" viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`} width={W} height={H} aria-hidden>

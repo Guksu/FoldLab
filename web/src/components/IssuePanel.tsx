@@ -1,7 +1,10 @@
+import { useState } from 'react';
+import { ChevronRight, CircleCheck, Crosshair, Lightbulb, RefreshCw, ScanSearch, TriangleAlert } from 'lucide-react';
 import { RULES, SEVERITY_LABEL, SEVERITY_ORDER } from '../../../shared/rules';
 import type { EmulationSupport } from '../../../shared/protocol';
-import type { Analysis, Insets, Layout } from '../../../shared/types';
+import type { Analysis, Insets, Layout, Severity } from '../../../shared/types';
 import { SEVERITY_COLOR } from '../lib/format';
+import { Button, IconButton } from './ui';
 
 interface Props {
   analysis: Analysis | null;
@@ -9,6 +12,7 @@ interface Props {
   support: EmulationSupport | null;
   selectedId: string | null;
   numbering: Map<string, number>;
+  postureName: string;
   onSelect: (id: string | null) => void;
   onReveal: (ref: number) => void;
   onReanalyze: () => void;
@@ -19,113 +23,186 @@ function insetText(i: Insets) {
   return `${i.top} / ${i.right} / ${i.bottom} / ${i.left}`;
 }
 
-export function IssuePanel({ analysis, layout, support, selectedId, numbering, onSelect, onReveal, onReanalyze, live }: Props) {
+export function IssuePanel({ analysis, layout, support, selectedId, numbering, postureName, onSelect, onReveal, onReanalyze, live }: Props) {
+  const [filter, setFilter] = useState<Severity | null>(null);
   const fresh = analysis && layout && analysis.postureId === layout.postureId ? analysis : null;
   const env = fresh?.env;
+  const issues = fresh ? (filter ? fresh.issues.filter((i) => i.severity === filter) : fresh.issues) : [];
+  const unsupported =
+    support && (support.segments === 'unsupported' || support.posture === 'unsupported' || support.safeArea === 'unsupported');
+
   return (
-    <aside className="panel">
-      <div className="panel-head">
+    <aside className="inspector" aria-label="검사 결과">
+      <header className="inspector-head">
         <div>
-          <h2>문제 목록</h2>
-          <p className="muted small">{fresh ? `현재 화면 기준 · ${fresh.ms}ms` : live ? '분석 중…' : '주소를 열면 자동으로 검사합니다'}</p>
+          <h2>
+            문제 목록
+            {fresh && <span className="count-pill">{fresh.issues.length}</span>}
+          </h2>
+          <p>{fresh ? `${postureName} 자세 · ${fresh.ms}ms` : live ? '페이지를 분석하는 중…' : '주소를 열면 자동으로 검사합니다'}</p>
         </div>
-        <button type="button" className="ghost small" onClick={onReanalyze} disabled={!live}>
-          다시 검사
-        </button>
-      </div>
+        <IconButton icon={RefreshCw} label="다시 검사" onClick={onReanalyze} disabled={!live} />
+      </header>
 
-      <div className="counts">
-        {SEVERITY_ORDER.map((s) => (
-          <span key={s} className={`count ${s}`}>
-            <i style={{ background: SEVERITY_COLOR[s] }} />
-            {SEVERITY_LABEL[s]} <b>{fresh ? fresh.counts[s] : '–'}</b>
-          </span>
-        ))}
-      </div>
-
-      <ol className="issues">
-        {fresh && fresh.issues.length === 0 && <li className="empty">이 자세에서는 문제를 찾지 못했습니다.</li>}
-        {fresh?.issues.map((issue) => {
-          const n = numbering.get(issue.id);
-          const open = issue.id === selectedId;
+      <div className="sev-tiles" role="group" aria-label="등급별로 거르기">
+        {SEVERITY_ORDER.map((s) => {
+          const n = fresh ? fresh.counts[s] : null;
+          const on = filter === s;
           return (
-            <li key={issue.id} className={`issue ${issue.severity}${open ? ' open' : ''}`}>
-              <button type="button" className="issue-main" onClick={() => onSelect(open ? null : issue.id)} aria-expanded={open}>
-                <span className="num" style={{ background: SEVERITY_COLOR[issue.severity] }}>
-                  {n}
-                </span>
-                <span className="issue-text">
-                  <span className="issue-title">
-                    <em className={`sev ${issue.severity}`}>{SEVERITY_LABEL[issue.severity]}</em>
-                    {issue.title}
-                  </span>
-                  {issue.label && <span className="issue-label">{issue.label}</span>}
-                </span>
-              </button>
-              {open && (
-                <div className="issue-body">
-                  <p>{issue.detail}</p>
-                  {issue.hint && <p className="hint">💡 {issue.hint}</p>}
-                  {issue.selector && <code className="selector">{issue.selector}</code>}
-                  <p className="muted small">{RULES[issue.rule].description}</p>
-                  {issue.ref !== undefined && issue.rects.length > 0 && (
-                    <button type="button" className="ghost small" onClick={() => onReveal(issue.ref!)}>
-                      위치로 스크롤
-                    </button>
-                  )}
-                </div>
-              )}
-            </li>
+            <button
+              key={s}
+              type="button"
+              className={`sev-tile ${s}${on ? ' on' : ''}${!n ? ' zero' : ''}`}
+              aria-pressed={on}
+              disabled={!fresh || (!n && !on)}
+              onClick={() => setFilter(on ? null : s)}
+              title={on ? '거르기 해제' : `${SEVERITY_LABEL[s]}만 보기`}
+            >
+              <span className="sev-tile-label">
+                <i className="dot" style={{ background: SEVERITY_COLOR[s] }} />
+                {SEVERITY_LABEL[s]}
+              </span>
+              <b>{n ?? '–'}</b>
+            </button>
           );
         })}
-      </ol>
+      </div>
 
-      {layout && (
-        <section className="env">
-          <h3>에뮬레이션 상태</h3>
-          <dl>
-            <dt>뷰포트</dt>
-            <dd>
-              {layout.viewport.w}×{layout.viewport.h} · DPR {layout.dpr}
-            </dd>
-            <dt>화면</dt>
-            <dd>
-              {layout.screen.w}×{layout.screen.h}
-              {layout.rotation ? ` · ${layout.rotation}° 회전` : ''}
-            </dd>
-            <dt>viewport-fit</dt>
-            <dd>{layout.fit}</dd>
-            <dt>safe-area</dt>
-            <dd title="위 / 오른쪽 / 아래 / 왼쪽">
-              {env ? insetText(env.safeArea) : insetText(layout.insets)}
-              {layout.mode === 'app' && <span className="muted"> (가림 {insetText(layout.rawInsets)})</span>}
-            </dd>
-            <dt>세그먼트</dt>
-            <dd>
-              {layout.displayFeature
-                ? `${layout.displayFeature.orientation === 'vertical' ? '좌우' : '위아래'} 2개 · 마스크 ${layout.displayFeature.maskLength}px`
-                : '1개'}
-              {env && env.segments.length > 1 && ' ✓'}
-            </dd>
-            <dt>device-posture</dt>
-            <dd>{env?.posture ?? layout.devicePosture}</dd>
-            {env && (
-              <>
-                <dt>meta viewport</dt>
-                <dd className="mono">{env.viewportMeta ?? '없음'}</dd>
-              </>
-            )}
-          </dl>
-          {support && (support.segments === 'unsupported' || support.posture === 'unsupported' || support.safeArea === 'unsupported') && (
-            <p className="warn-box">
-              이 크로미움 버전은
-              {support.segments === 'unsupported' && ' 화면 분할(Viewport Segments)'}
-              {support.posture === 'unsupported' && ' 자세(Device Posture)'}
-              {support.safeArea === 'unsupported' && ' 안전 영역(safe-area-inset)'} 에뮬레이션을 지원하지 않아 결과가 실제와 다를 수 있습니다.
+      <div className="inspector-body scroll-y">
+        {!fresh ? (
+          <div className="empty-state">
+            <span className="empty-icon">{live ? <span className="spinner" /> : <ScanSearch size={20} aria-hidden />}</span>
+            <h3>{live ? '분석 중' : '아직 검사한 페이지가 없어요'}</h3>
+            <p>
+              {live
+                ? '화면이 안정되면 접는 선·카메라·시스템 바에 걸린 요소를 찾아 보여 줍니다.'
+                : '위에서 주소를 열면 지금 자세에서 생기는 화면 문제를 자동으로 찾아 줍니다.'}
             </p>
-          )}
-        </section>
-      )}
+          </div>
+        ) : fresh.issues.length === 0 ? (
+          <div className="empty-state ok">
+            <span className="empty-icon">
+              <CircleCheck size={20} aria-hidden />
+            </span>
+            <h3>이 자세에서는 문제를 찾지 못했어요</h3>
+            <p>다른 자세로 바꿔 보거나 비교 시트로 한 번에 확인해 보세요.</p>
+          </div>
+        ) : (
+          <>
+            {filter && (
+              <div className="filter-note">
+                <span>
+                  {SEVERITY_LABEL[filter]} {issues.length}개만 보는 중
+                </span>
+                <Button variant="ghost" size="sm" onClick={() => setFilter(null)}>
+                  모두 보기
+                </Button>
+              </div>
+            )}
+            <ol className="issue-list">
+              {issues.map((issue) => {
+                const n = numbering.get(issue.id);
+                const open = issue.id === selectedId;
+                return (
+                  <li key={issue.id} className={`issue ${issue.severity}${open ? ' open' : ''}`}>
+                    <button type="button" className="issue-row" onClick={() => onSelect(open ? null : issue.id)} aria-expanded={open}>
+                      <span className="issue-num" style={{ background: SEVERITY_COLOR[issue.severity] }} aria-label={SEVERITY_LABEL[issue.severity]}>
+                        {n}
+                      </span>
+                      <span className="issue-text">
+                        <span className="issue-title">{issue.title}</span>
+                        <span className="issue-sub">
+                          {SEVERITY_LABEL[issue.severity]} · {issue.label || RULES[issue.rule].name}
+                        </span>
+                      </span>
+                      <ChevronRight className="issue-chev" size={16} aria-hidden />
+                    </button>
+                    {open && (
+                      <div className="issue-body">
+                        <p>{issue.detail}</p>
+                        {issue.hint && (
+                          <p className="hint">
+                            <Lightbulb size={14} aria-hidden />
+                            <span>{issue.hint}</span>
+                          </p>
+                        )}
+                        {issue.selector && <code className="selector">{issue.selector}</code>}
+                        <p className="rule-desc">{RULES[issue.rule].description}</p>
+                        {issue.ref !== undefined && issue.rects.length > 0 && (
+                          <div className="issue-actions">
+                            <Button size="sm" icon={Crosshair} onClick={() => onReveal(issue.ref!)}>
+                              위치로 스크롤
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </>
+        )}
+
+        {layout && (
+          <details className="env">
+            <summary>
+              <ChevronRight size={14} aria-hidden />
+              에뮬레이션 정보
+              {unsupported && (
+                <span className="badge badge-warn">
+                  <TriangleAlert size={12} aria-hidden />
+                  일부 미지원
+                </span>
+              )}
+            </summary>
+            <dl>
+              <dt>뷰포트</dt>
+              <dd>
+                {layout.viewport.w}×{layout.viewport.h} · DPR {layout.dpr}
+              </dd>
+              <dt>화면</dt>
+              <dd>
+                {layout.screen.w}×{layout.screen.h}
+                {layout.rotation ? ` · ${layout.rotation}° 회전` : ''}
+              </dd>
+              <dt>viewport-fit</dt>
+              <dd>{layout.fit}</dd>
+              <dt>safe-area</dt>
+              <dd title="위 / 오른쪽 / 아래 / 왼쪽">
+                {env ? insetText(env.safeArea) : insetText(layout.insets)}
+                {layout.mode === 'app' && <span className="muted"> (가림 {insetText(layout.rawInsets)})</span>}
+              </dd>
+              <dt>세그먼트</dt>
+              <dd>
+                {layout.displayFeature
+                  ? `${layout.displayFeature.orientation === 'vertical' ? '좌우' : '위아래'} 2개 · 마스크 ${layout.displayFeature.maskLength}px`
+                  : '1개'}
+                {env && env.segments.length > 1 && ' ✓'}
+              </dd>
+              <dt>device-posture</dt>
+              <dd>{env?.posture ?? layout.devicePosture}</dd>
+              {env && (
+                <>
+                  <dt>meta viewport</dt>
+                  <dd className="mono">{env.viewportMeta ?? '없음'}</dd>
+                </>
+              )}
+            </dl>
+            {unsupported && (
+              <p className="callout callout-warn">
+                <TriangleAlert size={14} aria-hidden />
+                <span>
+                  이 크로미움 버전은
+                  {support.segments === 'unsupported' && ' 화면 분할(Viewport Segments)'}
+                  {support.posture === 'unsupported' && ' 자세(Device Posture)'}
+                  {support.safeArea === 'unsupported' && ' 안전 영역(safe-area-inset)'} 에뮬레이션을 지원하지 않아 결과가 실제와 다를 수 있습니다.
+                </span>
+              </p>
+            )}
+          </details>
+        )}
+      </div>
     </aside>
   );
 }
