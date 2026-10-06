@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocket, WebSocketServer } from 'ws';
 import { encodeFrame, type ClientMessage, type ServerMessage } from '../shared/protocol';
+import { validateDevice } from '../shared/validate';
 import { closeBrowser, getBrowser } from './browser';
 import { config } from './config';
 import { LiveSession, type SessionSink } from './session';
@@ -82,6 +83,10 @@ wss.on('connection', (ws: WebSocket, req) => {
     .catch(fail);
 
   const handle = async (msg: ClientMessage) => {
+    if ((msg.t === 'open' || msg.t === 'configure') && msg.device) {
+      const problem = validateDevice(msg.device);
+      if (problem) throw new Error(`기기 정의 오류: ${problem}`);
+    }
     if (msg.t === 'open') {
       if (!session) {
         if (sessions.size >= config.maxSessions) throw new Error(`동시 세션은 ${config.maxSessions}개까지입니다. 잠시 뒤 다시 시도하세요.`);

@@ -27,6 +27,8 @@ export interface AnalyzeInput {
   twoSegments: boolean;
   rawInsets: Insets;
   apiUsage?: { segments: boolean; posture: boolean };
+  /** 크롬 안드로이드 탭에서 스크롤하면 하단 chin이 사라져 제스처 영역 아래까지 그려지는지 */
+  chinRisk?: boolean;
   maxPerRule?: number;
 }
 
@@ -105,7 +107,6 @@ const SKIP = new Set([
 ]);
 const MAX_ELEMENTS = 8000;
 const MIN_TARGET = 24;
-const LINE_EM_LIMIT = 45;
 
 const HIDDEN: Info = {
   clip: null,
@@ -424,6 +425,7 @@ export function analyze(input: AnalyzeInput): AnalyzeOutput {
 
   // ---------- 요소 수집 ----------
   const items: Item[] = [];
+  const fixedRoots: Array<{ el: Element; box: Rect; cs: CSSStyleDeclaration }> = [];
   const interactiveBoxes: Array<{ el: Element; box: Rect }> = [];
   const overflowOffenders: Element[] = [];
   const roots: ShadowRoot[] = [];
@@ -504,6 +506,7 @@ export function analyze(input: AnalyzeInput): AnalyzeOutput {
     if (transparent || cs.visibility === 'hidden' || box.w < 1 || box.h < 1 || !inherited) continue;
     const vis = inter(box, inherited);
     if (!vis) continue;
+    if ((selfFixed || pos === 'sticky') && !parent.fixed) fixedRoots.push({ el, box: vis, cs });
 
     let kind: Kind | null = null;
     if (el.matches(DIALOG)) kind = 'dialog';
@@ -532,9 +535,9 @@ export function analyze(input: AnalyzeInput): AnalyzeOutput {
   const fitMatch = metaContent ? /viewport-fit\s*=\s*([a-z]+)/i.exec(metaContent) : null;
   const pageFit = (fitMatch?.[1]?.toLowerCase() as ViewportFit | undefined) ?? 'auto';
   const se = document.scrollingElement ?? document.documentElement;
-  const css = scanCss();
-  const usesSegments = css.segments || !!input.apiUsage?.segments;
-  const usesPosture = css.posture || !!input.apiUsage?.posture;
+  const cssUsage = scanCss();
+  const usesSegments = cssUsage.segments || !!input.apiUsage?.segments;
+  const usesPosture = cssUsage.posture || !!input.apiUsage?.posture;
 
   const hasDeviceWidth = !!metaContent && /width\s*=\s*device-width|initial-scale\s*=\s*1(\.0*)?(\D|$)/i.test(metaContent);
   if (!hasDeviceWidth && s < 0.95) {
@@ -547,7 +550,7 @@ export function analyze(input: AnalyzeInput): AnalyzeOutput {
     );
   }
   if (metaContent && (/user-scalable\s*=\s*(no|0)/i.test(metaContent) || /maximum-scale\s*=\s*(0?\.\d+|1(\.0*)?)(\D|$)/i.test(metaContent))) {
-    add('zoom-disabled', 'info', null, [], `viewport 메타 "${metaContent}"가 확대를 막습니다.`);
+    add('zoom-disabled', 'warn', null, [], `viewport 메타 "${metaContent}"가 확대를 막습니다.`);
   }
 
   if (se.scrollWidth > layoutW + 1) {
@@ -555,7 +558,8 @@ export function analyze(input: AnalyzeInput): AnalyzeOutput {
     const rects = offenders.map((el) => inter(toDip(el.getBoundingClientRect()), { x: -1e6, y: 0, w: 2e6, h: vh })).filter(Boolean) as Rect[];
     add(
       'h-overflow',
-      'high',
+      // WCAG 1.4.10은 320px까지 가로 스크롤 없이 보여야 한다. 그보다 좁은 화면(분할 창 등)은 주의로 낮춘다
+      vw < 320 ? 'warn' : 'high',
       offenders[0] ?? null,
       rects,
       `문서 폭 ${se.scrollWidth}px가 화면 ${Math.round(layoutW)}px보다 ${se.scrollWidth - Math.round(layoutW)}px 넓습니다.` +
@@ -697,10 +701,25 @@ export function analyze(input: AnalyzeInput): AnalyzeOutput {
     }
 
     if (kind === 'text' && input.wide) {
+      // 한 줄 글자 수: 라틴 80자·한중일 40자 넘으면 참고, 120자·60자 넘으면 주의(WCAG 1.4.8, Android Studio)
       const fs = parseFloat(it.cs.fontSize) || 16;
-      const lh = parseFloat(it.cs.lineHeight) || fs * 1.4;
-      const ems = t.w / s / fs;
-      if (ems > LINE_EM_LIMIT && t.h / s > lh * 1.8 && ownTextLength(el) > 80) addAgg('line-length', 'info', el, t, it.fixed);
+      const lh = parseFloat(it.cs.lineHeight) || fs * 1.5;
+      const lines = Math.max(1, Math.round(t.h / s / lh));
+      // 직접 가진 텍스트만 센다(자식 블록 텍스트까지 세면 과대평가된다)
+      let text = '';
+      for (let n = el.firstChild; n; n = n.nextSibling) {
+        if (n.nodeType === 3) text += n.nodeValue ?? '';
+        else if (n.nodeType === 1 && getComputedStyle(n as Element).display.startsWith('inline')) text += (n as Element).textContent ?? '';
+      }
+      text = text.replace(/\s+/g, ' ').trim();
+      if (lines >= 2 && text.length > 60) {
+        const cjk = (text.match(/[\u1100-\u11ff\u3040-\u30ff\u3130-\u318f\u3400-\u9fff\uac00-\ud7af]/g)?.length ?? 0) / text.length >= 0.3;
+        // 마지막 줄은 짧을 수 있어 꽉 찬 줄 기준으로 센다
+        const perLine = text.length / Math.max(1, lines - 0.5);
+        const [infoAt, warnAt] = cjk ? [40, 60] : [80, 120];
+        if (perLine > warnAt) addAgg('line-length', 'warn', el, t, it.fixed);
+        else if (perLine > infoAt) addAgg('line-length', 'info', el, t, it.fixed);
+      }
     }
 
     // 화면 밖으로 잘린 텍스트(가로 스크롤이 막힌 경우)
@@ -734,9 +753,79 @@ export function analyze(input: AnalyzeInput): AnalyzeOutput {
     }
   }
 
+  // ---------- 고정 요소 ----------
+  const vpArea = vw * vh;
+  const layers = fixedRoots.filter(({ el, box, cs }) => {
+    const z = parseInt(cs.zIndex, 10);
+    return !el.matches(DIALOG) && !(z < 0) && box.w * box.h < vpArea * 0.9;
+  });
+  if (layers.length) {
+    // 8px 격자로 겹친 부분을 한 번만 센다
+    const cell = 8;
+    const cols = Math.ceil(vw / cell);
+    const rows = Math.ceil(vh / cell);
+    const grid = new Uint8Array(cols * rows);
+    for (const { box } of layers) {
+      for (let y = Math.max(0, Math.floor(box.y / cell)); y < Math.min(rows, Math.ceil((box.y + box.h) / cell)); y++) {
+        for (let x = Math.max(0, Math.floor(box.x / cell)); x < Math.min(cols, Math.ceil((box.x + box.w) / cell)); x++) grid[y * cols + x] = 1;
+      }
+    }
+    const ratio = grid.reduce((a, b) => a + b, 0) / grid.length;
+    if (ratio > 0.3) {
+      const short = vh < 480;
+      add(
+        'sticky-overload',
+        short ? (ratio > 0.5 ? 'high' : 'warn') : 'info',
+        null,
+        layers.map((l) => l.box),
+        `고정 요소가 화면의 ${Math.round(ratio * 100)}%를 늘 덮습니다(화면 높이 ${vh}px).`,
+        true,
+      );
+    }
+  }
+
+  for (const { el, box } of fixedRoots) {
+    if (box.w * box.h < vpArea * 0.8) continue;
+    const text = ((el as HTMLElement).innerText ?? '').slice(0, 400);
+    if (/회전|돌려\s*주|가로\s*모드|세로\s*모드|세로로|가로로|rotate|portrait|landscape/i.test(text)) {
+      add('orientation-lock', 'high', el, [box], `화면 대부분을 덮는 안내가 있습니다: “${text.replace(/\s+/g, ' ').trim().slice(0, 40)}”`, true);
+    }
+  }
+
+  for (const { el, box, cs } of fixedRoots) {
+    if (box.h < vh * 0.4 || el.matches(DIALOG + ',[role="presentation"]') === false && box.w < vw * 0.5) continue;
+    const ov = cs.overflowY;
+    if (ov === 'auto' || ov === 'scroll' || ov === 'overlay') continue;
+    const he = el as HTMLElement;
+    const contentBottom = box.y + he.scrollHeight * s;
+    if (contentBottom <= vh + 4 || he.scrollHeight <= he.clientHeight + 4 && ov !== 'visible') continue;
+    const scroller = Array.from(el.querySelectorAll('*')).some((c) => {
+      const o = getComputedStyle(c).overflowY;
+      return (o === 'auto' || o === 'scroll') && (c as HTMLElement).scrollHeight > (c as HTMLElement).clientHeight + 4;
+    });
+    if (!scroller) {
+      add(
+        'overlay-unscrollable',
+        'high',
+        el,
+        [box],
+        `고정된 영역의 내용이 화면 아래로 ${Math.round(contentBottom - vh)}px 넘치지만 스크롤할 수 없습니다.`,
+        true,
+      );
+    }
+  }
+
+  // ---------- 크롬 135+ 하단 chin ----------
+  if (input.chinRisk && !cssUsage.safe) {
+    for (const { el, box } of fixedRoots) {
+      if (box.y + box.h < vh - 2 || box.h > vh * 0.5 || !el.querySelector(INTERACTIVE) && !el.matches(INTERACTIVE)) continue;
+      add('bottom-chin', 'warn', el, [box], '스크롤하면 하단 막대가 사라지면서 이 고정 요소가 제스처 영역(안드로이드 내비게이션 바)에 가려집니다.', true);
+    }
+  }
+
   const anyRaw = input.rawInsets.top + input.rawInsets.right + input.rawInsets.bottom + input.rawInsets.left > 0;
   if (input.mode === 'app' && anyRaw) {
-    if (input.fit === 'cover' && !css.safe) {
+    if (input.fit === 'cover' && !cssUsage.safe) {
       add('safe-area-unused', 'warn', null, [], 'env(safe-area-inset-*)를 쓰는 CSS가 없어 가장자리 요소가 시스템 UI에 가려질 수 있습니다.');
     } else if (input.fit !== 'cover') {
       add('letterbox', 'info', null, [], '화면 가장자리(상태 표시줄·카메라·제스처 영역)는 비워 둔 채 그립니다.');
@@ -749,7 +838,7 @@ export function analyze(input: AnalyzeInput): AnalyzeOutput {
       'info',
       null,
       [],
-      `두 세그먼트 자세지만 viewport-segments·device-posture를 쓰는 코드를 찾지 못했습니다${css.unreadable ? ` (읽을 수 없는 외부 CSS ${css.unreadable}개 제외)` : ''}.`,
+      `두 세그먼트 자세지만 viewport-segments·device-posture를 쓰는 코드를 찾지 못했습니다${cssUsage.unreadable ? ` (읽을 수 없는 외부 CSS ${cssUsage.unreadable}개 제외)` : ''}.`,
     );
   }
 
@@ -797,10 +886,10 @@ export function analyze(input: AnalyzeInput): AnalyzeOutput {
     safeArea: readSafeArea(),
     segments: Array.from(seg).map((r) => ({ x: r.x, y: r.y, w: r.width, h: r.height })),
     posture: nav.devicePosture?.type ?? null,
-    usesSafeArea: css.safe,
+    usesSafeArea: cssUsage.safe,
     usesSegments,
     usesPosture,
-    unreadableSheets: css.unreadable,
+    unreadableSheets: cssUsage.unreadable,
     scale: s,
     media: {
       horizontalSegments2: matchMedia('(horizontal-viewport-segments: 2)').matches,
@@ -818,4 +907,117 @@ export function reveal(ref: number): boolean {
   if (!el || !el.isConnected) return false;
   el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' as ScrollBehavior });
   return true;
+}
+
+// ---------- 자세 전환 연속성 ----------
+
+interface Snap {
+  inputs: Array<{ ref: number; value: string; key: string }>;
+  anchor: { ref: number; top: number; text: string } | null;
+  videos: Array<{ ref: number; t: number }>;
+}
+
+declare global {
+  interface Window {
+    __foldlabSnap?: { refs: Element[]; data: Snap };
+  }
+}
+
+export interface ContinuityFinding {
+  severity: Severity;
+  detail: string;
+  label?: string;
+  selector?: string;
+  rect?: Rect;
+}
+
+const TEXTUAL =
+  'input:not([type]),input[type="text"],input[type="search"],input[type="email"],input[type="tel"],input[type="url"],input[type="number"],textarea';
+
+function dipRect(el: Element): Rect {
+  const vv = window.visualViewport;
+  const s = vv ? vv.scale : 1;
+  const r = el.getBoundingClientRect();
+  return round({ x: (r.x - (vv?.offsetLeft ?? 0)) * s, y: (r.y - (vv?.offsetTop ?? 0)) * s, w: r.width * s, h: r.height * s });
+}
+
+/** 자세를 바꾸기 직전 상태(입력값, 보던 위치, 재생 중인 동영상)를 기록한다 */
+export function snapshot(): boolean {
+  const refs: Element[] = [];
+  const ref = (el: Element) => refs.push(el) - 1;
+  const inputs = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(TEXTUAL))
+    .filter((el) => !!el.value)
+    .slice(0, 20)
+    .map((el) => ({ ref: ref(el), value: el.value, key: el.getAttribute('name') || el.id || '' }));
+  let anchor: Snap['anchor'] = null;
+  if (window.scrollY > 50) {
+    let el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight * 0.35);
+    // 글자가 있는 블록까지 올라간다
+    while (el && el !== document.body && ((el as HTMLElement).innerText ?? '').trim().length < 8) el = el.parentElement;
+    if (el && el !== document.body && el !== document.documentElement) {
+      anchor = {
+        ref: ref(el),
+        top: el.getBoundingClientRect().top,
+        text: ((el as HTMLElement).innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 24),
+      };
+    }
+  }
+  const videos = Array.from(document.querySelectorAll('video'))
+    .filter((v) => !v.paused && !v.ended)
+    .slice(0, 5)
+    .map((v) => ({ ref: ref(v), t: v.currentTime }));
+  window.__foldlabSnap = { refs, data: { inputs, anchor, videos } };
+  return true;
+}
+
+/** snapshot() 이후 달라진 점. 기록 자체가 없으면(문서가 새로 로드됨) null */
+export function compareSnapshot(): ContinuityFinding[] | null {
+  const snap = window.__foldlabSnap;
+  if (!snap) return null;
+  const { refs, data } = snap;
+  const out: ContinuityFinding[] = [];
+  for (const i of data.inputs) {
+    const el = refs[i.ref] as HTMLInputElement;
+    if (el.isConnected && el.value === i.value) continue;
+    // 다시 그려졌더라도 같은 이름의 입력이 값을 이어받았으면 괜찮다
+    let same: HTMLInputElement | null = null;
+    if (i.key) {
+      try {
+        same = document.querySelector(`[name="${CSS.escape(i.key)}"],#${CSS.escape(i.key)}`);
+      } catch {
+        same = null;
+      }
+    }
+    if (same && same.value === i.value) continue;
+    const target = el.isConnected ? el : same;
+    out.push({
+      severity: 'high',
+      detail: `입력해 둔 값 “${i.value.slice(0, 20)}”이(가) 사라졌습니다.`,
+      label: target ? describe(target) : undefined,
+      selector: target ? cssPath(target) : undefined,
+      rect: target ? dipRect(target) : undefined,
+    });
+  }
+  if (data.anchor) {
+    const el = refs[data.anchor.ref];
+    if (!el.isConnected) {
+      out.push({ severity: 'warn', detail: `보던 콘텐츠(“${data.anchor.text}”)가 다시 그려져 스크롤 위치를 잃었습니다.` });
+    } else {
+      const r = el.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) {
+        out.push({
+          severity: 'warn',
+          detail: `보던 콘텐츠(“${data.anchor.text}”)가 화면 밖으로 밀려나 스크롤 위치를 잃었습니다.`,
+          label: describe(el),
+          selector: cssPath(el),
+        });
+      }
+    }
+  }
+  for (const v of data.videos) {
+    const el = refs[v.ref] as HTMLVideoElement;
+    if (!el.isConnected || el.paused) out.push({ severity: 'warn', detail: '재생 중이던 동영상이 멈췄습니다.', label: el.isConnected ? describe(el) : '<video>' });
+    else if (el.currentTime + 0.5 < v.t) out.push({ severity: 'warn', detail: '동영상이 처음으로 돌아갔습니다.', label: describe(el) });
+  }
+  return out;
 }

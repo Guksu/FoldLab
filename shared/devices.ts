@@ -1,42 +1,220 @@
-import type { DeviceSpec, PostureSpec } from './types';
+import type { Cutout, DeviceSpec, PostureSpec } from './types';
 
 /**
- * 기기 카탈로그.
- * CSS px = 물리 px ÷ devicePixelRatio. 크롬 안드로이드는 소수점을 올림한다(예: 1080 ÷ 2.625 = 411.4 → 412).
- * 카메라·상태 표시줄·제스처 영역 같은 값은 공식 자료가 없는 경우 화면 비율로 추정했다(notes 참고).
- * {chrome}은 실행 중인 크로미움 주 버전으로 바뀐다.
+ * 기기 카탈로그(2026-10 기준). 근거는 docs/RESEARCH.md에 정리했다.
+ *
+ * - CSS px = 물리 px ÷ devicePixelRatio. 크롬 안드로이드는 올림한다(1080 ÷ 2.625 = 411.4 → 412).
+ * - 안드로이드 값(밀도, 상태 표시줄, 제스처 영역, 카메라, 접는 선)은 실기기 측정값(windowinsets.info, Remote Test Lab)과
+ *   삼성 공식 에뮬레이터 스킨을 우선했다. 추정치는 notes에 적었다.
+ * - 크롬 110+ 안드로이드 UA는 'Android 10; K'로 고정되고 실제 모델명은 UA Client Hints로만 간다.
+ * - {chrome}은 실행 중인 크로미움 주 버전으로 바뀐다.
  */
 
-const ANDROID_UA = (model: string, android = '16') =>
-  `Mozilla/5.0 (Linux; Android ${android}; ${model}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome} Mobile Safari/537.36`;
+const CHROME_ANDROID_UA =
+  'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome} Mobile Safari/537.36';
+const SAFARI_IOS_UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.1 Mobile/15E148 Safari/604.1';
 
-/** 책처럼 펼치는 폴더블 공통 자세 */
-function bookPostures(): PostureSpec[] {
+/** 중심 좌표와 반지름으로 원형 카메라를 만든다 */
+function hole(cx: number, cy: number, r: number, label = '전면 카메라', reported = true): Cutout {
+  const c: Cutout = { shape: 'circle', x: +(cx - r).toFixed(1), y: +(cy - r).toFixed(1), w: +(r * 2).toFixed(1), h: +(r * 2).toFixed(1), label };
+  if (!reported) c.reported = false;
+  return c;
+}
+
+/** 책처럼 펼치는 폴더블 공통 자세. 안쪽 화면이 원래 가로형이면(폴드8, 아이폰 듀오) 돌린 자세 이름을 바꾼다. */
+export function bookPostures(opts: { mainLandscape?: boolean } = {}): PostureSpec[] {
+  const rotatedLabel = opts.mainLandscape ? '펼침 · 세로' : '펼침 · 가로';
   return [
     { id: 'folded', label: '접힘', hint: '커버 화면', screen: 'cover', rotation: 0, posture: 'continuous', segments: false, sheet: true },
-    { id: 'unfolded', label: '펼침', hint: '메인 화면을 평평하게', screen: 'main', rotation: 0, posture: 'continuous', segments: false, sheet: true },
+    { id: 'unfolded', label: '펼침', hint: '안쪽 화면을 평평하게', screen: 'main', rotation: 0, posture: 'continuous', segments: false, sheet: true },
     { id: 'split-left', label: '분할 · 왼쪽', hint: '화면 분할 왼쪽 앱', screen: 'main', rotation: 0, region: 'left', posture: 'continuous', segments: false, sheet: true },
     { id: 'split-right', label: '분할 · 오른쪽', hint: '화면 분할 오른쪽 앱', screen: 'main', rotation: 0, region: 'right', posture: 'continuous', segments: false, sheet: true },
     { id: 'book', label: '반 접힘 · 북', hint: '세로 접는 선으로 두 세그먼트', screen: 'main', rotation: 0, posture: 'folded', segments: true, angle: 110 },
-    { id: 'tabletop', label: '반 접힘 · 테이블탑', hint: '가로로 눕혀 위아래 두 세그먼트', screen: 'main', rotation: 90, posture: 'folded', segments: true, angle: 110 },
-    { id: 'unfolded-landscape', label: '펼침 · 가로', screen: 'main', rotation: 90, posture: 'continuous', segments: false },
+    { id: 'tabletop', label: '반 접힘 · 테이블탑', hint: '돌려서 위아래 두 세그먼트', screen: 'main', rotation: 90, posture: 'folded', segments: true, angle: 110 },
+    { id: 'unfolded-rotated', label: rotatedLabel, screen: 'main', rotation: 90, posture: 'continuous', segments: false },
     { id: 'folded-landscape', label: '접힘 · 가로', screen: 'cover', rotation: 90, posture: 'continuous', segments: false },
   ];
 }
 
 /** 위아래로 접는 플립 공통 자세 */
-function flipPostures(): PostureSpec[] {
+export function flipPostures(): PostureSpec[] {
   return [
     { id: 'cover', label: '커버 화면', hint: '접은 채 바깥 화면', screen: 'cover', rotation: 0, posture: 'continuous', segments: false, sheet: true },
     { id: 'unfolded', label: '펼침', screen: 'main', rotation: 0, posture: 'continuous', segments: false, sheet: true },
     { id: 'flex', label: '반 접힘 · 플렉스', hint: '위아래 두 세그먼트', screen: 'main', rotation: 0, posture: 'folded', segments: true, angle: 100, sheet: true },
     { id: 'split-top', label: '분할 · 위', screen: 'main', rotation: 0, region: 'top', posture: 'continuous', segments: false, sheet: true },
     { id: 'split-bottom', label: '분할 · 아래', screen: 'main', rotation: 0, region: 'bottom', posture: 'continuous', segments: false },
-    { id: 'unfolded-landscape', label: '펼침 · 가로', screen: 'main', rotation: 90, posture: 'continuous', segments: false },
+    { id: 'unfolded-rotated', label: '펼침 · 가로', screen: 'main', rotation: 90, posture: 'continuous', segments: false },
+  ];
+}
+
+function dualPostures(): PostureSpec[] {
+  return [
+    { id: 'single', label: '한 화면', screen: 'single', rotation: 0, posture: 'continuous', segments: false, sheet: true },
+    { id: 'spanned', label: '두 화면 걸침', hint: '힌지 아래는 화면이 없음', screen: 'dual', rotation: 0, posture: 'continuous', segments: true, sheet: true },
+    { id: 'spanned-rotated', label: '두 화면 · 가로', hint: '위아래로 걸침', screen: 'dual', rotation: 90, posture: 'continuous', segments: true, sheet: true },
+    { id: 'single-rotated', label: '한 화면 · 가로', screen: 'single', rotation: 90, posture: 'continuous', segments: false },
   ];
 }
 
 export const DEVICES: DeviceSpec[] = [
+  // ───────────── 책형 폴더블 ─────────────
+  {
+    id: 'iphone-duo',
+    name: 'iPhone Duo',
+    brand: 'Apple',
+    kind: 'book',
+    platform: 'ios',
+    status: 'announced',
+    released: '2026-10-23',
+    userAgent: SAFARI_IOS_UA,
+    browser: 'Safari',
+    foldApis: false,
+    browserBar: 'side',
+    frameColor: '#262c38',
+    screens: [
+      {
+        id: 'cover',
+        label: '바깥 화면 5.4″',
+        width: 466,
+        height: 678,
+        dpr: 3,
+        radius: 59,
+        corners: { tl: 8, tr: 59, br: 59, bl: 8 },
+        statusBarSide: 'right',
+        statusBar: 84,
+        navBar: 34,
+        cutouts: [{ shape: 'pill', x: 406, y: 20, w: 37, h: 120, label: '다이내믹 아일랜드' }],
+        folds: [],
+        physical: { width: 1398, height: 2034, diagonal: 5.4 },
+      },
+      {
+        id: 'main',
+        label: '안쪽 화면 7.6″',
+        width: 951,
+        height: 669,
+        dpr: 3,
+        radius: 55,
+        statusBarSide: 'right',
+        statusBar: 84,
+        navBar: 34,
+        cutouts: [{ shape: 'pill', x: 890, y: 20, w: 37, h: 120, label: '다이내믹 아일랜드' }],
+        folds: [{ axis: 'vertical', at: 475.5, gap: 0, kind: 'crease', band: 40 }],
+        physical: { width: 2670, height: 1878, diagonal: 7.6 },
+      },
+    ],
+    postures: bookPostures({ mainLandscape: true }).map((p) =>
+      // 안쪽 화면을 세로로 돌린 자세만 위쪽 가로 막대를 쓴다(애플 HIG)
+      p.screen === 'main' && p.rotation === 90 ? { ...p, statusBarSide: 'top' as const, statusBar: 54 } : p,
+    ),
+    notes:
+      '2026-09-09 발표, 10-23 출시. 화면 크기는 애플 사양·App Store 스크린숏 규격(2853×2007 = 951×669pt @3x). ' +
+      '상태 표시줄·다이내믹 아일랜드가 오른쪽 세로 막대(84pt)에 있고 안전 영역은 위 0·오른쪽 84·아래 34. ' +
+      '반 접으면 가운데 40pt를 비운다. 사파리는 Viewport Segments를 지원하지 않는다. 다이내믹 아일랜드 위치는 추정. ' +
+      '렌더링은 크로미움이라 WebKit 고유 동작은 재현하지 않는다.',
+    sources: [
+      'https://www.apple.com/iphone-duo/specs/',
+      'https://www.apple.com/newsroom/2026/09/apple-unveils-iphone-duo/',
+      'https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications',
+      'https://safearea.info/iphone-duo',
+      'https://plurigent.com/topics/iphone-duo/safe-area',
+    ],
+  },
+  {
+    id: 'galaxy-z-fold8',
+    name: 'Galaxy Z Fold8',
+    brand: 'Samsung',
+    kind: 'book',
+    platform: 'android',
+    status: 'released',
+    released: '2026-08-07',
+    userAgent: CHROME_ANDROID_UA,
+    uaModel: 'SM-F971N',
+    platformVersion: '17.0.0',
+    frameColor: '#262b36',
+    screens: [
+      {
+        id: 'cover',
+        label: '커버 화면 5.5″',
+        width: 476,
+        height: 752,
+        dpr: 2.625,
+        radius: 10,
+        cutouts: [hole(237.9, 23, 11.6)],
+        folds: [],
+        statusBar: 42,
+        navBar: 15,
+        physical: { width: 1248, height: 1972, diagonal: 5.5 },
+      },
+      {
+        id: 'main',
+        label: '메인 화면 7.6″ (가로형)',
+        width: 933,
+        height: 704,
+        dpr: 2.625,
+        radius: 7,
+        cutouts: [hole(708.8, 23, 11.6, '안쪽 카메라', false)],
+        folds: [{ axis: 'vertical', at: 466.3, gap: 0, kind: 'crease' }],
+        statusBar: 40,
+        navBar: 15,
+        physical: { width: 2448, height: 1848, diagonal: 7.6 },
+      },
+    ],
+    postures: bookPostures({ mainLandscape: true }),
+    notes: '2026 와이드 모델. 안쪽 화면이 4:3 가로형이다. 안쪽 펀치 홀은 안드로이드가 안전 영역으로 알려 주지 않는다.',
+    sources: [
+      'https://news.samsung.com/uk/samsung-galaxy-z-fold8-ultra-fold8-and-flip8-foldables-perfected-for-every-way-of-living',
+      'https://github.com/easyhooon/windowinsets.info/tree/main/measurements/galaxy-fold/galaxy-z-fold8',
+    ],
+  },
+  {
+    id: 'galaxy-z-fold8-ultra',
+    name: 'Galaxy Z Fold8 Ultra',
+    brand: 'Samsung',
+    kind: 'book',
+    platform: 'android',
+    status: 'released',
+    released: '2026-08-07',
+    userAgent: CHROME_ANDROID_UA,
+    uaModel: 'SM-F976N',
+    platformVersion: '17.0.0',
+    frameColor: '#1d2330',
+    screens: [
+      {
+        id: 'cover',
+        label: '커버 화면 6.5″',
+        width: 360,
+        height: 840,
+        dpr: 3,
+        radius: 5,
+        cutouts: [hole(180.5, 20.5, 10.5)],
+        folds: [],
+        statusBar: 38,
+        navBar: 15,
+        physical: { width: 1080, height: 2520, diagonal: 6.5 },
+      },
+      {
+        id: 'main',
+        label: '메인 화면 8.0″',
+        width: 752,
+        height: 835,
+        dpr: 3,
+        radius: 5,
+        cutouts: [hole(569.5, 20.8, 10.5, '안쪽 카메라', false)],
+        folds: [{ axis: 'vertical', at: 376, gap: 0, kind: 'crease' }],
+        statusBar: 38,
+        navBar: 15,
+        physical: { width: 2256, height: 2504, diagonal: 8.0 },
+      },
+    ],
+    postures: bookPostures(),
+    notes: 'DPR이 3.0(480dpi)으로 바뀌어 커버 화면이 360px 폭이다.',
+    sources: [
+      'https://news.samsung.com/uk/samsung-galaxy-z-fold8-ultra-fold8-and-flip8-foldables-perfected-for-every-way-of-living',
+      'https://github.com/easyhooon/windowinsets.info/tree/main/measurements/galaxy-fold/galaxy-z-fold8-ultra',
+    ],
+  },
   {
     id: 'galaxy-z-fold7',
     name: 'Galaxy Z Fold7',
@@ -44,8 +222,8 @@ export const DEVICES: DeviceSpec[] = [
     kind: 'book',
     platform: 'android',
     status: 'released',
-    released: '2025-07',
-    userAgent: ANDROID_UA('SM-F966N'),
+    released: '2025-07-25',
+    userAgent: CHROME_ANDROID_UA,
     uaModel: 'SM-F966N',
     platformVersion: '16.0.0',
     frameColor: '#1d2330',
@@ -56,11 +234,11 @@ export const DEVICES: DeviceSpec[] = [
         width: 412,
         height: 960,
         dpr: 2.625,
-        radius: 34,
-        cutouts: [{ shape: 'circle', x: 196, y: 12, w: 20, h: 20, label: '전면 카메라' }],
+        radius: 5,
+        cutouts: [hole(205.7, 23.6, 11.8)],
         folds: [],
-        statusBar: 40,
-        navBar: 24,
+        statusBar: 42,
+        navBar: 15,
         physical: { width: 1080, height: 2520, diagonal: 6.5 },
       },
       {
@@ -69,15 +247,165 @@ export const DEVICES: DeviceSpec[] = [
         width: 750,
         height: 832,
         dpr: 2.625,
-        radius: 26,
-        cutouts: [{ shape: 'circle', x: 668, y: 12, w: 20, h: 20, label: '안쪽 카메라' }],
+        radius: 5,
+        cutouts: [hole(566.9, 20.2, 13.3, '안쪽 카메라', false)],
         folds: [{ axis: 'vertical', at: 375, gap: 0, kind: 'crease' }],
-        statusBar: 40,
-        navBar: 24,
+        statusBar: 34,
+        navBar: 15,
         physical: { width: 1968, height: 2184, diagonal: 8.0 },
       },
     ],
     postures: bookPostures(),
+    notes: '안쪽 펀치 홀은 안드로이드가 DisplayCutout으로 알려 주지 않아 env(safe-area-inset-*)가 0이다.',
+    sources: [
+      'https://www.samsung.com/levant/smartphones/galaxy-z-fold7/specs/',
+      'https://developer.samsung.com/galaxy-emulator-skin/galaxy-z.html',
+      'https://github.com/easyhooon/windowinsets.info/tree/main/measurements/galaxy-fold/galaxy-z-fold7',
+    ],
+  },
+  {
+    id: 'galaxy-z-fold6',
+    name: 'Galaxy Z Fold6',
+    brand: 'Samsung',
+    kind: 'book',
+    platform: 'android',
+    status: 'released',
+    released: '2024-07-24',
+    userAgent: CHROME_ANDROID_UA,
+    uaModel: 'SM-F956N',
+    platformVersion: '16.0.0',
+    frameColor: '#2b3140',
+    screens: [
+      {
+        id: 'cover',
+        label: '커버 화면 6.3″',
+        width: 369,
+        height: 906,
+        dpr: 2.625,
+        radius: 6,
+        cutouts: [hole(184.6, 21.1, 11.2)],
+        folds: [],
+        statusBar: 36,
+        navBar: 15,
+        physical: { width: 968, height: 2376, diagonal: 6.3 },
+      },
+      {
+        id: 'main',
+        label: '메인 화면 7.6″',
+        width: 708,
+        height: 823,
+        dpr: 2.625,
+        radius: 5,
+        cutouts: [],
+        folds: [{ axis: 'vertical', at: 353.5, gap: 0, kind: 'crease' }],
+        statusBar: 36,
+        navBar: 15,
+        physical: { width: 1856, height: 2160, diagonal: 7.6 },
+      },
+    ],
+    postures: bookPostures(),
+    notes: '크롬 개발자 도구 프리셋(412×968 / 744×860)은 실기기와 다르다. 안쪽 카메라는 화면 아래(UDC)라 보이지 않는다.',
+    sources: [
+      'https://www.samsung.com/ph/smartphones/galaxy-z-fold6/specs/',
+      'https://github.com/easyhooon/windowinsets.info/tree/main/measurements/galaxy-fold/galaxy-z-fold6',
+    ],
+  },
+  {
+    id: 'pixel-10-pro-fold',
+    name: 'Pixel 10 Pro Fold',
+    brand: 'Google',
+    kind: 'book',
+    platform: 'android',
+    status: 'released',
+    released: '2025-10-09',
+    userAgent: CHROME_ANDROID_UA,
+    uaModel: 'Pixel 10 Pro Fold',
+    platformVersion: '16.0.0',
+    frameColor: '#3a3d42',
+    screens: [
+      {
+        id: 'cover',
+        label: '바깥 화면 6.4″',
+        width: 444,
+        height: 970,
+        dpr: 2.4375,
+        radius: 47,
+        cutouts: [hole(221.7, 32.2, 13.7)],
+        folds: [],
+        statusBar: 62,
+        navBar: 24,
+        physical: { width: 1080, height: 2364, diagonal: 6.4 },
+      },
+      {
+        id: 'main',
+        label: '안쪽 화면 8.0″',
+        width: 852,
+        height: 883,
+        dpr: 2.4375,
+        radius: 35,
+        cutouts: [hole(815.4, 32.8, 16.2, '안쪽 카메라')],
+        folds: [{ axis: 'vertical', at: 425.9, gap: 0, kind: 'crease' }],
+        statusBar: 66,
+        navBar: 32,
+        physical: { width: 2076, height: 2152, diagonal: 8.0 },
+      },
+    ],
+    postures: bookPostures(),
+    notes: '390dpi(DPR 2.4375). 개발자 도구의 Pixel 9 Pro Fold 프리셋(412×922)은 실기기와 다르다.',
+    sources: [
+      'https://store.google.com/product/pixel_10_pro_fold_specs',
+      'https://github.com/easyhooon/windowinsets.info/tree/main/measurements/pixel/pixel-10-pro-fold',
+    ],
+  },
+
+  // ───────────── 플립 ─────────────
+  {
+    id: 'galaxy-z-flip8',
+    name: 'Galaxy Z Flip8',
+    brand: 'Samsung',
+    kind: 'flip',
+    platform: 'android',
+    status: 'released',
+    released: '2026-08-07',
+    userAgent: CHROME_ANDROID_UA,
+    uaModel: 'SM-F776N',
+    platformVersion: '17.0.0',
+    frameColor: '#20304a',
+    screens: [
+      {
+        id: 'cover',
+        label: '플렉스윈도우 4.1″',
+        width: 400,
+        height: 442,
+        dpr: 2.375,
+        radius: 41,
+        corners: { tl: 5, tr: 5, br: 41, bl: 41 },
+        cutouts: [hole(206.5, 392.2, 13.7, '플래시'), hole(269.5, 392, 37.5, '후면 카메라'), hole(349.9, 392, 37.5, '후면 카메라')],
+        folds: [],
+        statusBar: 0,
+        navBar: 0,
+        physical: { width: 948, height: 1048, diagonal: 4.1 },
+      },
+      {
+        id: 'main',
+        label: '메인 화면 6.9″',
+        width: 360,
+        height: 840,
+        dpr: 3,
+        radius: 22,
+        cutouts: [hole(180, 20, 10.3)],
+        folds: [{ axis: 'horizontal', at: 420, gap: 0, kind: 'crease' }],
+        statusBar: 36,
+        navBar: 15,
+        physical: { width: 1080, height: 2520, diagonal: 6.9 },
+      },
+    ],
+    postures: flipPostures(),
+    notes: '플렉스윈도우에서 삼성 인터넷이 바로 돈다. 커버 화면 밀도가 380dpi(DPR 2.375)로 플립7과 다르다.',
+    sources: [
+      'https://news.samsung.com/uk/samsung-galaxy-z-fold8-ultra-fold8-and-flip8-foldables-perfected-for-every-way-of-living',
+      'https://github.com/easyhooon/windowinsets.info/tree/main/measurements/galaxy-flip/galaxy-z-flip8',
+    ],
   },
   {
     id: 'galaxy-z-flip7',
@@ -86,8 +414,8 @@ export const DEVICES: DeviceSpec[] = [
     kind: 'flip',
     platform: 'android',
     status: 'released',
-    released: '2025-07',
-    userAgent: ANDROID_UA('SM-F766N'),
+    released: '2025-07-25',
+    userAgent: CHROME_ANDROID_UA,
     uaModel: 'SM-F766N',
     platformVersion: '16.0.0',
     frameColor: '#20304a',
@@ -95,35 +423,144 @@ export const DEVICES: DeviceSpec[] = [
       {
         id: 'cover',
         label: '플렉스윈도우 4.1″',
-        width: 361,
+        width: 362,
         height: 400,
         dpr: 2.625,
-        radius: 40,
-        cutouts: [
-          { shape: 'circle', x: 20, y: 296, w: 40, h: 40, label: '후면 카메라' },
-          { shape: 'circle', x: 76, y: 296, w: 40, h: 40, label: '후면 카메라' },
-        ],
+        radius: 41,
+        corners: { tl: 6, tr: 6, br: 41, bl: 41 },
+        cutouts: [hole(186.9, 354.7, 12.8, '플래시'), hole(243.8, 354.9, 33.5, '후면 카메라'), hole(316.6, 354.9, 33.5, '후면 카메라')],
         folds: [],
-        statusBar: 28,
+        statusBar: 0,
         navBar: 0,
         physical: { width: 948, height: 1048, diagonal: 4.1 },
       },
       {
         id: 'main',
         label: '메인 화면 6.9″',
-        width: 412,
-        height: 960,
-        dpr: 2.625,
-        radius: 30,
-        cutouts: [{ shape: 'circle', x: 196, y: 12, w: 20, h: 20, label: '전면 카메라' }],
-        folds: [{ axis: 'horizontal', at: 480, gap: 0, kind: 'crease' }],
-        statusBar: 40,
-        navBar: 24,
+        width: 360,
+        height: 840,
+        dpr: 3,
+        radius: 22,
+        cutouts: [hole(180, 19.3, 11.3)],
+        folds: [{ axis: 'horizontal', at: 420, gap: 0, kind: 'crease' }],
+        statusBar: 36,
+        navBar: 15,
         physical: { width: 1080, height: 2520, diagonal: 6.9 },
       },
     ],
     postures: flipPostures(),
+    notes: '커버 화면(DPR 2.625)의 카메라 섬은 오른쪽 아래에 있다. 크롬을 커버에서 쓰려면 실험실 설정이 필요하다.',
+    sources: [
+      'https://en.wikipedia.org/wiki/Samsung_Galaxy_Z_Flip_7',
+      'https://developer.samsung.com/galaxy-emulator-skin/galaxy-z.html',
+      'https://github.com/easyhooon/windowinsets.info/tree/main/measurements/galaxy-flip/galaxy-z-flip7',
+    ],
   },
+  {
+    id: 'galaxy-z-flip6',
+    name: 'Galaxy Z Flip6',
+    brand: 'Samsung',
+    kind: 'flip',
+    platform: 'android',
+    status: 'released',
+    released: '2024-07-24',
+    userAgent: CHROME_ANDROID_UA,
+    uaModel: 'SM-F741N',
+    platformVersion: '16.0.0',
+    frameColor: '#2c3a4f',
+    screens: [
+      {
+        id: 'cover',
+        label: '플렉스윈도우 3.4″',
+        width: 360,
+        height: 374,
+        dpr: 2,
+        radius: 24,
+        cutouts: [],
+        folds: [],
+        statusBar: 0,
+        navBar: 0,
+        physical: { width: 720, height: 748, diagonal: 3.4 },
+      },
+      {
+        id: 'main',
+        label: '메인 화면 6.7″',
+        width: 360,
+        height: 880,
+        dpr: 3,
+        radius: 38,
+        cutouts: [hole(180.2, 19.5, 10.5)],
+        folds: [{ axis: 'horizontal', at: 440, gap: 0, kind: 'crease' }],
+        statusBar: 31,
+        navBar: 15,
+        physical: { width: 1080, height: 2640, diagonal: 6.7 },
+      },
+    ],
+    postures: flipPostures(),
+    notes: '메인 화면은 실측, 커버 화면 DPR(2.0)과 카메라 모양(폴더형)은 확인하지 못해 카메라를 넣지 않았다. 플립7 FE도 같은 패널이다.',
+    sources: ['https://github.com/easyhooon/windowinsets.info/tree/main/measurements/galaxy-flip/galaxy-z-flip6'],
+  },
+
+  // ───────────── 트라이폴드 ─────────────
+  {
+    id: 'galaxy-z-trifold',
+    name: 'Galaxy Z TriFold',
+    brand: 'Samsung',
+    kind: 'trifold',
+    platform: 'android',
+    status: 'released',
+    released: '2025-12-12',
+    userAgent: CHROME_ANDROID_UA,
+    uaModel: 'SM-F968N',
+    platformVersion: '16.0.0',
+    frameColor: '#1f2633',
+    screens: [
+      {
+        id: 'cover',
+        label: '커버 화면 6.5″',
+        width: 412,
+        height: 960,
+        dpr: 2.625,
+        radius: 8,
+        cutouts: [hole(205.9, 23.4, 12.4)],
+        folds: [],
+        statusBar: 43,
+        navBar: 15,
+        physical: { width: 1080, height: 2520, diagonal: 6.5 },
+      },
+      {
+        id: 'main',
+        label: '메인 화면 10″ (가로형)',
+        width: 1080,
+        height: 792,
+        dpr: 2,
+        radius: 2,
+        cutouts: [hole(906, 20, 11.5, '안쪽 카메라', false)],
+        folds: [
+          { axis: 'vertical', at: 333, gap: 0, kind: 'crease' },
+          { axis: 'vertical', at: 715.5, gap: 0, kind: 'crease' },
+        ],
+        statusBar: 36,
+        navBar: 15,
+        physical: { width: 2160, height: 1584, diagonal: 10 },
+      },
+    ],
+    postures: [
+      { id: 'folded', label: '접힘', hint: '커버 화면', screen: 'cover', rotation: 0, posture: 'continuous', segments: false, sheet: true },
+      { id: 'unfolded', label: '완전히 펼침', hint: '주름 두 줄', screen: 'main', rotation: 0, posture: 'continuous', segments: false, sheet: true },
+      { id: 'unfolded-rotated', label: '펼침 · 세로', screen: 'main', rotation: 90, posture: 'continuous', segments: false, sheet: true },
+      { id: 'folded-landscape', label: '접힘 · 가로', screen: 'cover', rotation: 90, posture: 'continuous', segments: false },
+    ],
+    notes:
+      '주름 두 줄(x≈333, 715)은 삼성 공식 스킨에서 잰 추정치다. 안드로이드는 x=540에 접는 선 하나만 알려 준다. ' +
+      '10인치·8GB 이상이라 크롬이 기본으로 데스크톱 사이트를 열 수 있다(미확인).',
+    sources: [
+      'https://news.samsung.com/global/introducing-galaxy-z-trifold-the-shape-of-whats-next-in-mobile-innovation',
+      'https://github.com/easyhooon/windowinsets.info/tree/main/measurements/galaxy-fold/galaxy-z-trifold',
+    ],
+  },
+
+  // ───────────── 듀얼 스크린 ─────────────
   {
     id: 'surface-duo-2',
     name: 'Surface Duo 2',
@@ -131,42 +568,62 @@ export const DEVICES: DeviceSpec[] = [
     kind: 'dual',
     platform: 'android',
     status: 'released',
-    released: '2021-10',
-    userAgent: ANDROID_UA('Surface Duo 2', '12'),
+    released: '2021-10-21',
+    userAgent: CHROME_ANDROID_UA,
     uaModel: 'Surface Duo 2',
     platformVersion: '12.0.0',
     frameColor: '#d9d9d6',
     screens: [
-      {
-        id: 'single',
-        label: '한 화면 5.8″',
-        width: 540,
-        height: 720,
-        dpr: 2.5,
-        radius: 12,
-        cutouts: [],
-        folds: [],
-        statusBar: 24,
-        navBar: 16,
-      },
+      { id: 'single', label: '한 화면 5.8″', width: 538, height: 757, dpr: 2.5, radius: 0, cutouts: [], folds: [], statusBar: 24, navBar: 24 },
       {
         id: 'dual',
         label: '두 화면 8.3″',
+        width: 1102,
+        height: 757,
+        dpr: 2.5,
+        radius: 0,
+        cutouts: [],
+        folds: [{ axis: 'vertical', at: 550.8, gap: 26, kind: 'hinge' }],
+        statusBar: 24,
+        navBar: 24,
+      },
+    ],
+    postures: dualPostures(),
+    notes: '단종(마지막 OS 안드로이드 12L). 최신 크롬은 안드로이드 13 미만에서 화면 분할을 알려 주지 않으므로 힌지 동작 확인용 레거시 기기다.',
+    sources: ['https://learn.microsoft.com/en-us/previous-versions/dual-screen/android/surface-duo-dimensions'],
+  },
+  {
+    id: 'surface-duo',
+    name: 'Surface Duo',
+    brand: 'Microsoft',
+    kind: 'dual',
+    platform: 'android',
+    status: 'released',
+    released: '2020-09-10',
+    userAgent: CHROME_ANDROID_UA,
+    uaModel: 'Surface Duo',
+    platformVersion: '11.0.0',
+    frameColor: '#d9d9d6',
+    screens: [
+      { id: 'single', label: '한 화면 5.6″', width: 540, height: 720, dpr: 2.5, radius: 0, cutouts: [], folds: [], statusBar: 24, navBar: 24 },
+      {
+        id: 'dual',
+        label: '두 화면 8.1″',
         width: 1114,
         height: 720,
         dpr: 2.5,
-        radius: 12,
+        radius: 0,
         cutouts: [],
         folds: [{ axis: 'vertical', at: 557, gap: 34, kind: 'hinge' }],
         statusBar: 24,
-        navBar: 16,
+        navBar: 24,
       },
     ],
-    postures: [
-      { id: 'single', label: '한 화면', screen: 'single', rotation: 0, posture: 'continuous', segments: false, sheet: true },
-      { id: 'spanned', label: '두 화면 걸침', hint: '힌지 아래는 화면이 없음', screen: 'dual', rotation: 0, posture: 'continuous', segments: true, sheet: true },
-      { id: 'spanned-landscape', label: '두 화면 · 가로', hint: '위아래로 걸침', screen: 'dual', rotation: 90, posture: 'continuous', segments: true, sheet: true },
-      { id: 'single-landscape', label: '한 화면 · 가로', screen: 'single', rotation: 90, posture: 'continuous', segments: false },
+    postures: dualPostures(),
+    notes: '크롬 개발자 도구 프리셋과 같은 값(힌지 34px). 단종된 레거시 기기다.',
+    sources: [
+      'https://learn.microsoft.com/en-us/previous-versions/dual-screen/android/surface-duo-dimensions',
+      'https://github.com/ChromeDevTools/devtools-frontend/blob/main/front_end/models/emulation/EmulatedDevices.ts',
     ],
   },
 ];
@@ -175,4 +632,4 @@ export function getDevice(id: string): DeviceSpec | undefined {
   return DEVICES.find((d) => d.id === id);
 }
 
-export const DEFAULT_DEVICE_ID = 'galaxy-z-fold7';
+export const DEFAULT_DEVICE_ID = 'iphone-duo';

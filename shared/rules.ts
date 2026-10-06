@@ -124,6 +124,36 @@ export const RULES: Record<RuleId, RuleMeta> = {
     description: 'viewport-fit=cover가 없어 카메라·시스템 바 쪽 가장자리가 빈 띠로 남습니다.',
     hint: '화면 끝까지 쓰려면 viewport-fit=cover와 safe-area 여백을 함께 쓰세요.',
   },
+  'sticky-overload': {
+    id: 'sticky-overload',
+    name: '고정 요소 과점유',
+    description: '고정 헤더·하단 바·배너가 낮은 화면의 큰 부분을 늘 덮어 실제 콘텐츠가 보이는 공간이 좁습니다.',
+    hint: '높이가 낮은 화면(@media (max-height: 480px))에서는 고정 요소를 줄이거나 position: static으로 바꾸세요.',
+  },
+  'orientation-lock': {
+    id: 'orientation-lock',
+    name: '화면 방향 강요',
+    description: '"화면을 돌려 주세요" 같은 안내로 이 방향의 사용을 막습니다. 폴드8·아이폰 듀오 안쪽 화면은 가로가 기본입니다.',
+    hint: '방향에 상관없이 쓸 수 있게 레이아웃을 맞추세요(WCAG 1.3.4).',
+  },
+  'overlay-unscrollable': {
+    id: 'overlay-unscrollable',
+    name: '스크롤 안 되는 오버레이',
+    description: '고정 메뉴·대화상자의 내용이 화면보다 길지만 스크롤할 수 없어 아래쪽이 잘립니다.',
+    hint: 'max-height: 100dvh와 overflow-y: auto를 주세요.',
+  },
+  'bottom-chin': {
+    id: 'bottom-chin',
+    name: '스크롤 시 하단 가림',
+    description: '크롬 135+ 엣지 투 엣지: 스크롤해 하단 막대(chin)가 사라지면 화면 끝에 붙은 고정 요소가 제스처 영역 아래로 들어갑니다.',
+    hint: 'bottom: env(safe-area-inset-bottom, 0px) 또는 safe-area-max-inset-bottom 패턴을 쓰세요.',
+  },
+  continuity: {
+    id: 'continuity',
+    name: '자세 전환 시 상태 유실',
+    description: '접거나 펼친 뒤에 입력값·스크롤 위치·재생 상태가 유지되지 않습니다.',
+    hint: '리사이즈 때 페이지를 새로 그리지 말고, 스크롤 앵커(overflow-anchor)와 폼 상태를 유지하세요.',
+  },
   'segments-unaware': {
     id: 'segments-unaware',
     name: '접힘 대응 코드 없음',

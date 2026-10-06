@@ -1,6 +1,6 @@
 import type { Browser, BrowserContext, CDPSession, Page } from 'playwright';
-import type { AnalyzeInput, AnalyzeOutput } from '../inpage/analyze';
-import { computeLayout, findPosture, findScreen, parseViewportFit, screenOrientation } from '../shared/geometry';
+import type { AnalyzeInput, AnalyzeOutput, ContinuityFinding } from '../inpage/analyze';
+import { computeLayout, findPosture, findScreen, parseViewportFit, resolveFit, screenOrientation } from '../shared/geometry';
 import type {
   CaptureItem,
   CaptureResult,
@@ -9,7 +9,8 @@ import type {
   ServerMessage,
   SessionState,
 } from '../shared/protocol';
-import type { Analysis, DeviceSpec, DisplayMode, FitPolicy, Layout, Severity, ViewportFit } from '../shared/types';
+import { RULES } from '../shared/rules';
+import type { Analysis, DeviceSpec, DisplayMode, FitPolicy, Issue, Layout, Severity, ViewportFit } from '../shared/types';
 import { config } from './config';
 import { normalizeUrl, resolvesToPrivate } from './guard';
 import { getAnalyzerSource, getHooksSource } from './inpage';
@@ -60,6 +61,8 @@ export class LiveSession {
   private capturing = false;
   private closed = false;
   private touching = false;
+  /** 마지막 자세 전환에서 발견한 연속성 문제(그 자세의 분석 결과에 함께 싣는다) */
+  private continuity: { postureId: string; issues: Issue[] } | null = null;
   lastActive = Date.now();
 
   constructor(
@@ -105,6 +108,7 @@ export class LiveSession {
     this.page.on('framenavigated', (frame) => {
       if (frame !== this.page.mainFrame()) return;
       this.worldId = null;
+      if (!this.capturing) this.continuity = null;
       void this.pushState();
     });
     this.page.on('domcontentloaded', () => void this.onDocumentReady());
@@ -128,12 +132,23 @@ export class LiveSession {
 
   async configure(next: { device?: DeviceSpec; postureId?: string; mode?: DisplayMode; fit?: FitPolicy }): Promise<void> {
     const platformChanged = !!next.device && next.device.platform !== this.device.platform;
+    const from = this.postureId;
+    const sameDevice = !next.device || next.device.id === this.device.id;
     if (next.device) this.device = next.device;
     if (next.postureId || next.device) this.postureId = findPosture(this.device, next.postureId ?? this.postureId).id;
     if (next.mode) this.mode = next.mode;
     if (next.fit) this.fit = next.fit;
+    // 같은 기기에서 자세만 바꾸면 실제 기기처럼 상태가 이어지는지 함께 본다
+    const transition = sameDevice && from !== this.postureId ? await this.beginTransition() : null;
     await this.applyEmulation();
     await this.pushState();
+    if (transition) {
+      await this.settle();
+      const issues = await this.endTransition(transition, from, this.postureId);
+      this.continuity = { postureId: this.postureId, issues };
+    } else if (!sameDevice) {
+      this.continuity = null;
+    }
     if (platformChanged && this.page.url().startsWith('http')) {
       // UA가 크게 바뀌면 서버 렌더링 결과도 달라질 수 있어 새로 불러온다
       await this.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
@@ -142,7 +157,7 @@ export class LiveSession {
   }
 
   private effectiveFit(): ViewportFit {
-    return this.fit === 'page' ? this.pageFit : this.fit;
+    return resolveFit(this.device, this.mode, this.fit, this.pageFit);
   }
 
   private async applyEmulation(): Promise<void> {
@@ -164,10 +179,16 @@ export class LiveSession {
       positionY: vp.y,
       screenOrientation: screenOrientation(layout.rotation, screen.height >= screen.width),
     };
+    // 화면 분할은 setDisplayFeaturesOverride가 아니라 이 (deprecated) 인자로만 반영된다.
+    // 크롬 121~148은 이 호출 때마다 자세를 이 값으로 다시 밀어 넣으므로 자세도 함께 준다.
     if (layout.displayFeature) metrics.displayFeature = layout.displayFeature;
+    metrics.devicePosture = { type: layout.devicePosture };
     await this.cdp.send('Emulation.setDeviceMetricsOverride', metrics as never);
 
-    // setDeviceMetricsOverride가 자세를 초기화하므로 그 뒤에 설정한다
+    await this.applyUserAgent();
+    if (widthChanged) await this.normalizePageScale();
+
+    // JS(navigator.devicePosture)까지 바꾸려면 별도 명령이 필요하다. 크기 변경이 끝난 뒤에 건다.
     try {
       await this.cdp.send('Emulation.setDevicePostureOverride' as never, { posture: { type: layout.devicePosture } } as never);
       this.support.posture = 'ok';
@@ -175,20 +196,22 @@ export class LiveSession {
       this.support.posture = 'unsupported';
     }
 
+    // 값을 빼면 env()가 정의되지 않은 상태가 되므로 8개를 모두 넘긴다
     const ins = layout.insets;
+    const max = layout.maxInsets;
     try {
       await this.cdp.send(
         'Emulation.setSafeAreaInsetsOverride' as never,
         {
           insets: {
             top: ins.top,
-            topMax: ins.top,
+            topMax: Math.max(ins.top, max.top),
             right: ins.right,
-            rightMax: ins.right,
+            rightMax: Math.max(ins.right, max.right),
             bottom: ins.bottom,
-            bottomMax: ins.bottom,
+            bottomMax: Math.max(ins.bottom, max.bottom),
             left: ins.left,
-            leftMax: ins.left,
+            leftMax: Math.max(ins.left, max.left),
           },
         } as never,
       );
@@ -197,8 +220,6 @@ export class LiveSession {
       this.support.safeArea = 'unsupported';
     }
 
-    await this.applyUserAgent();
-    if (widthChanged) await this.normalizePageScale();
     await this.verifySegments();
     await this.ensureScreencast();
   }
@@ -526,16 +547,79 @@ export class LiveSession {
       twoSegments: !!L.displayFeature,
       rawInsets: L.rawInsets,
       apiUsage: usage ?? undefined,
+      chinRisk: L.mode === 'browser' && this.device.platform === 'android' && L.maxInsets.bottom > 0 && L.insets.bottom === 0,
     };
     const out = await this.evalInWorld<AnalyzeOutput>(`__foldlab.analyze(${JSON.stringify(input)})`);
     const counts: Record<Severity, number> = { high: 0, warn: 0, info: 0 };
     for (const i of out.issues) counts[i.severity]++;
-    return { postureId: L.postureId, issues: out.issues, counts, env: out.env, at: Date.now(), ms: Date.now() - t0 };
+    return this.withContinuity({ postureId: L.postureId, issues: out.issues, counts, env: out.env, at: Date.now(), ms: Date.now() - t0 });
   }
 
   async reveal(ref: number): Promise<void> {
     await this.evalInWorld<boolean>(`__foldlab.reveal(${Number(ref)})`).catch(() => false);
     this.scheduleAnalyze(450);
+  }
+
+  // ---------- 자세 전환 연속성 ----------
+
+  /** 자세를 바꾸기 직전: 메인 월드에 표식을 남기고 입력값·보던 위치·재생 상태를 기록한다 */
+  private async beginTransition(): Promise<{ nonce: string; url: string } | null> {
+    const url = this.page.url();
+    if (!url.startsWith('http') || this.loading) return null;
+    const nonce = Math.random().toString(36).slice(2);
+    const ok = await this.cdp
+      .send('Runtime.evaluate', {
+        expression: `Object.defineProperty(window, '__foldlabSentinel', { value: '${nonce}', configurable: true, enumerable: false }) && true`,
+        returnByValue: true,
+      })
+      .then((r) => r.result.value === true)
+      .catch(() => false);
+    if (!ok) return null;
+    await this.evalInWorld<boolean>('__foldlab.snapshot()').catch(() => false);
+    return { nonce, url };
+  }
+
+  private async endTransition(t: { nonce: string; url: string }, from: string, to: string): Promise<Issue[]> {
+    const label = (id: string) => findPosture(this.device, id).label;
+    const prefix = `${label(from)} → ${label(to)}: `;
+    const mk = (f: ContinuityFinding, i: number): Issue => ({
+      id: `continuity:${from}>${to}:${i}`,
+      rule: 'continuity',
+      severity: f.severity,
+      title: RULES.continuity.name,
+      detail: prefix + f.detail,
+      hint: RULES.continuity.hint,
+      selector: f.selector,
+      label: f.label,
+      rects: f.rect ? [f.rect] : [],
+      fixed: false,
+      scroll: { x: 0, y: 0 },
+    });
+    const sentinel = await this.cdp
+      .send('Runtime.evaluate', { expression: 'window.__foldlabSentinel', returnByValue: true })
+      .then((r) => r.result.value as string | undefined)
+      .catch(() => undefined);
+    const url = this.page.url();
+    if (sentinel !== t.nonce || url !== t.url) {
+      const detail =
+        url !== t.url ? `자세를 바꾸자 다른 주소(${url})로 이동했습니다.` : '자세를 바꾸자 페이지를 새로 불러와 상태가 모두 초기화됐습니다.';
+      return [mk({ severity: 'high', detail }, 0)];
+    }
+    const findings = await this.evalInWorld<ContinuityFinding[] | null>('__foldlab.compareSnapshot()').catch(() => null);
+    if (!findings) return [mk({ severity: 'high', detail: '자세를 바꾸자 문서가 새로 만들어졌습니다.' }, 0)];
+    return findings.map(mk);
+  }
+
+  /** 분석 결과에 이 자세의 연속성 문제를 더한다 */
+  private withContinuity(a: Analysis): Analysis {
+    const c = this.continuity;
+    if (!c || c.postureId !== a.postureId || !c.issues.length) return a;
+    const issues = [...c.issues.filter((i) => i.severity === 'high'), ...a.issues, ...c.issues.filter((i) => i.severity !== 'high')];
+    const order: Record<Severity, number> = { high: 0, warn: 1, info: 2 };
+    issues.sort((x, y) => order[x.severity] - order[y.severity]);
+    const counts: Record<Severity, number> = { high: 0, warn: 0, info: 0 };
+    for (const i of issues) counts[i.severity]++;
+    return { ...a, issues, counts };
   }
 
   // ---------- 비교 시트 ----------
@@ -549,13 +633,17 @@ export class LiveSession {
     this.analyzeTimer = null;
     if (this.analyzing) await this.analyzing;
     const original = this.postureId;
+    const originalContinuity = this.continuity;
     const items: CaptureItem[] = [];
     try {
       for (let i = 0; i < ids.length; i++) {
+        const from = this.postureId;
+        const transition = from !== ids[i] ? await this.beginTransition() : null;
         this.postureId = ids[i];
         await this.applyEmulation();
         await this.pushState();
         await this.settle();
+        this.continuity = transition ? { postureId: ids[i], issues: await this.endTransition(transition, from, ids[i]) } : null;
         const analysis = await this.analyze();
         const image = await this.screenshot();
         if (analysis) items.push({ postureId: ids[i], layout: this.layout, image, imageScale: CAPTURE_SCALE, analysis });
@@ -563,6 +651,7 @@ export class LiveSession {
       }
     } finally {
       this.postureId = original;
+      this.continuity = originalContinuity;
       await this.applyEmulation().catch(() => {});
       this.capturing = false;
       await this.pushState().catch(() => {});

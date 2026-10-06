@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_DEVICE_ID, DEVICES } from '../../shared/devices';
-import { computeLayout } from '../../shared/geometry';
+import { computeLayout, resolveFit } from '../../shared/geometry';
 import type { CaptureResult, SessionState } from '../../shared/protocol';
 import type { Analysis, DeviceKind, DeviceSpec, DisplayMode, FitPolicy } from '../../shared/types';
+import { CustomDeviceDialog } from './components/CustomDeviceDialog';
 import { IssuePanel } from './components/IssuePanel';
 import { LiveDevice } from './components/LiveDevice';
 import { SheetView } from './components/SheetView';
@@ -12,6 +13,7 @@ import { FoldLabClient, type ConnectionStatus } from './lib/session';
 import { buildMarkdown, copyPng, downloadBlob, sheetFilename, svgToPng } from './lib/sheet';
 
 const STORAGE_KEY = 'foldlab:v1';
+const CUSTOM_KEY = 'foldlab:custom-devices';
 
 const KIND_LABEL: Record<DeviceKind, string> = {
   book: '책처럼 펼치는 폴더블',
@@ -42,6 +44,23 @@ function loadSaved(): Saved {
     return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') as Saved;
   } catch {
     return {};
+  }
+}
+
+function loadCustomDevices(): DeviceSpec[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(CUSTOM_KEY) ?? '[]') as DeviceSpec[];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCustomDevices(list: DeviceSpec[]) {
+  try {
+    localStorage.setItem(CUSTOM_KEY, JSON.stringify(list));
+  } catch {
+    /* 저장소를 못 쓰는 환경 */
   }
 }
 
@@ -78,10 +97,13 @@ export function App() {
   const [conn, setConn] = useState<ConnectionStatus>('idle');
   const [browserVersion, setBrowserVersion] = useState('');
   const [urlInput, setUrlInput] = useState(params.get('url') ?? saved.url ?? '');
+  const [customDevices, setCustomDevices] = useState<DeviceSpec[]>(loadCustomDevices);
+  const allDevices = useMemo(() => [...DEVICES, ...customDevices], [customDevices]);
   const [deviceId, setDeviceId] = useState(
-    [params.get('device'), saved.deviceId].find((id) => id && DEVICES.some((d) => d.id === id)) ?? DEFAULT_DEVICE_ID,
+    [params.get('device'), saved.deviceId].find((id) => id && allDevices.some((d) => d.id === id)) ?? DEFAULT_DEVICE_ID,
   );
-  const device = DEVICES.find((d) => d.id === deviceId) ?? DEVICES[0];
+  const device = allDevices.find((d) => d.id === deviceId) ?? DEVICES[0];
+  const [customOpen, setCustomOpen] = useState(false);
   const [postureId, setPostureId] = useState(params.get('posture') ?? saved.postureId ?? 'unfolded');
   const [mode, setMode] = useState<DisplayMode>((params.get('mode') as DisplayMode) ?? saved.mode ?? 'app');
   const [fit, setFit] = useState<FitPolicy>(saved.fit ?? 'page');
@@ -118,7 +140,15 @@ export function App() {
   }, [urlInput, deviceId, validPosture, mode, fit, toggles, debug]);
 
   useEffect(() => {
-    const offStatus = client.on('status', setConn);
+    const offStatus = client.on('status', (st) => {
+      setConn(st);
+      // 서버 세션은 연결과 함께 사라지므로 화면도 초기 상태로 돌린다
+      if (st === 'closed') {
+        setSession(null);
+        setAnalysis(null);
+        setProgress(null);
+      }
+    });
     const offMsg = client.on('message', (m) => {
       switch (m.t) {
         case 'hello':
@@ -180,8 +210,12 @@ export function App() {
     if (session) client.send({ t: 'configure', ...next });
   };
 
-  const changeDevice = (id: string) => {
-    const next = DEVICES.find((d) => d.id === id);
+  const changeDevice = (id: string, list = allDevices) => {
+    if (id === '__custom') {
+      setCustomOpen(true);
+      return;
+    }
+    const next = list.find((d) => d.id === id);
     if (!next) return;
     const pid = next.postures.some((p) => p.id === validPosture) ? validPosture : next.postures[1]?.id ?? next.postures[0].id;
     setDeviceId(id);
@@ -245,8 +279,9 @@ export function App() {
     }
   };
 
+  // 아직 페이지를 열지 않았을 때 보여 줄 레이아웃(페이지 메타를 모르니 cover로 가정)
   const fallbackLayout = useMemo(
-    () => computeLayout(device, validPosture, { mode, fit: fit === 'cover' ? 'cover' : fit === 'auto' ? 'auto' : mode === 'app' ? 'cover' : 'auto' }),
+    () => computeLayout(device, validPosture, { mode, fit: resolveFit(device, mode, fit, 'cover') }),
     [device, validPosture, mode, fit],
   );
   const live = !!session && session.deviceId === device.id && session.url.startsWith('http');
@@ -256,6 +291,32 @@ export function App() {
   const groups = (Object.keys(KIND_LABEL) as DeviceKind[])
     .map((kind) => ({ kind, items: DEVICES.filter((d) => d.kind === kind) }))
     .filter((g) => g.items.length);
+
+  const addCustomDevice = (d: DeviceSpec) => {
+    const list = [...customDevices.filter((c) => c.id !== d.id), d];
+    setCustomDevices(list);
+    saveCustomDevices(list);
+    setCustomOpen(false);
+    changeDevice(d.id, [...DEVICES, ...list]);
+    showToast(`'${d.name}' 기기를 추가했습니다.`);
+  };
+
+  const removeCustomDevice = () => {
+    if (device.status !== 'custom') return;
+    const list = customDevices.filter((c) => c.id !== device.id);
+    setCustomDevices(list);
+    saveCustomDevices(list);
+    changeDevice(DEFAULT_DEVICE_ID, [...DEVICES, ...list]);
+  };
+
+  const copyDeviceJson = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(device, null, 2));
+      showToast('기기 정의 JSON을 복사했습니다. 팀원에게 공유해 가져오기로 추가할 수 있습니다.');
+    } catch {
+      showToast('클립보드에 접근할 수 없습니다.');
+    }
+  };
 
   const demoUrl = `${location.origin}/demo/trip`;
 
@@ -320,8 +381,26 @@ export function App() {
                 ))}
               </optgroup>
             ))}
+            <optgroup label="직접 만든 기기">
+              {customDevices.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+              <option value="__custom">＋ 기기 직접 만들기…</option>
+            </optgroup>
           </select>
         </label>
+        {device.status === 'custom' && (
+          <div className="custom-actions">
+            <button type="button" className="ghost small" onClick={() => void copyDeviceJson()}>
+              JSON 복사
+            </button>
+            <button type="button" className="ghost small" onClick={removeCustomDevice}>
+              삭제
+            </button>
+          </div>
+        )}
         <div className="seg" role="radiogroup" aria-label="표시 방식">
           {(['browser', 'app'] as DisplayMode[]).map((m) => (
             <button key={m} type="button" role="radio" aria-checked={mode === m} className={mode === m ? 'on' : ''} onClick={() => changeMode(m)}>
@@ -491,6 +570,7 @@ export function App() {
           )}
         </main>
       )}
+      {customOpen && <CustomDeviceDialog onSave={addCustomDevice} onClose={() => setCustomOpen(false)} />}
       {toast && (
         <div className="toast" role="status" onClick={() => setToast(null)}>
           {toast}

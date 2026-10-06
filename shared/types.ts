@@ -37,6 +37,8 @@ export interface Cutout {
   w: number;
   h: number;
   label?: string;
+  /** false면 OS가 안전 영역으로 알려 주지 않는다(삼성 폴드 안쪽 펀치 홀 등). 화면은 가리지만 env() 값은 0이다 */
+  reported?: boolean;
 }
 
 /**
@@ -48,7 +50,19 @@ export interface Fold {
   at: number;
   gap: number;
   kind: 'crease' | 'hinge';
+  /** 반 접혔을 때 시스템이 비워 두는 띠의 폭(아이폰 듀오 40pt). 없으면 기본값을 쓴다 */
+  band?: number;
 }
+
+export interface Corners {
+  tl: number;
+  tr: number;
+  br: number;
+  bl: number;
+}
+
+/** 상태 표시줄이 붙는 가장자리(현재 방향 기준). 아이폰 듀오는 오른쪽 세로 막대다. */
+export type BarSide = 'top' | 'left' | 'right';
 
 export interface ScreenSpec {
   id: string;
@@ -59,9 +73,12 @@ export interface ScreenSpec {
   dpr: number;
   /** 화면 모서리 반경 */
   radius: number;
+  /** 모서리마다 반경이 다를 때(기본 방향 기준) */
+  corners?: Corners;
+  statusBarSide?: BarSide;
   cutouts: Cutout[];
   folds: Fold[];
-  /** 상태 표시줄 높이 */
+  /** 상태 표시줄 두께(위쪽이면 높이, 옆이면 폭) */
   statusBar: number;
   /** 제스처 내비게이션 영역(홈 인디케이터) 높이 */
   navBar: number;
@@ -86,6 +103,11 @@ export interface PostureSpec {
   angle?: number;
   /** 비교 시트 기본 선택 여부 */
   sheet?: boolean;
+  /** 이 자세에서 상태 표시줄이 붙는 가장자리(화면 설정보다 우선) */
+  statusBarSide?: BarSide;
+  /** 이 자세의 상태 표시줄 두께·홈 인디케이터 높이(화면 설정보다 우선) */
+  statusBar?: number;
+  navBar?: number;
 }
 
 export type DeviceKind = 'book' | 'flip' | 'dual' | 'trifold';
@@ -105,6 +127,12 @@ export interface DeviceSpec {
   screens: ScreenSpec[];
   postures: PostureSpec[];
   frameColor?: string;
+  /** false면 브라우저가 Viewport Segments·Device Posture를 지원하지 않는다(사파리 등) */
+  foldApis?: boolean;
+  /** 브라우저 주소창 위치. 기본은 안드로이드 위, iOS 아래. side는 상태 표시줄 막대에 함께 들어간다 */
+  browserBar?: 'top' | 'bottom' | 'side';
+  /** 브라우저 이름(표시용) */
+  browser?: string;
   sources?: string[];
   notes?: string;
 }
@@ -148,17 +176,21 @@ export interface Layout {
   rotation: Rotation;
   dpr: number;
   /** 회전이 반영된 화면 크기 */
-  screen: { w: number; h: number; radius: number };
+  screen: { w: number; h: number; radius: number; corners: Corners };
   /** 앱 창(화면 좌표) */
   window: Rect;
   /** 웹 뷰포트(화면 좌표) */
   viewport: Rect;
   /** 페이지에 전달되는 env(safe-area-inset-*) 값 */
   insets: Insets;
+  /** env(safe-area-max-inset-*) 값(크롬 135+ 하단 chin이 사라졌을 때의 값) */
+  maxInsets: Insets;
   /** viewport-fit=cover였다면 전달됐을 값(실제로 가려지는 깊이) */
   rawInsets: Insets;
   displayFeature: DisplayFeature | null;
   devicePosture: DevicePostureType;
+  /** 물리적으로 반 접힌 자세인지(페이지에 알려 주는지와는 별개) */
+  halfOpen: boolean;
   folds: ViewportFold[];
   obstructions: Obstruction[];
   /** 그리기용(화면 좌표) */
@@ -194,7 +226,12 @@ export type RuleId =
   | 'wide-unused'
   | 'safe-area-unused'
   | 'letterbox'
-  | 'segments-unaware';
+  | 'segments-unaware'
+  | 'sticky-overload'
+  | 'orientation-lock'
+  | 'overlay-unscrollable'
+  | 'bottom-chin'
+  | 'continuity';
 
 export interface Issue {
   id: string;

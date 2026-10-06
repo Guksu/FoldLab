@@ -94,6 +94,30 @@ describe('문제 있는 데모 페이지', () => {
   });
 });
 
+describe('라이브 조작', () => {
+  it('터치로 버튼을 누르면 열린 대화상자가 접는 선에 걸린 것을 찾는다', async () => {
+    const device = getDevice('galaxy-z-fold7')!;
+    const browser = await getBrowser();
+    const session = new LiveSession(browser, { json: () => {}, frame: (_h, _j, done) => done() }, { device, postureId: 'book', mode: 'app', fit: 'page' });
+    try {
+      await session.start();
+      await session.navigate(base);
+      const before = (await session.analyze())!;
+      expect(before.issues.some((i) => i.label?.includes('저장한 장소'))).toBe(false);
+      const more = before.issues.find((i) => i.label?.includes('장소 더 보기'))!;
+      const r = more.rects[0];
+      await session.touch('start', r.x + r.w / 2, r.y + r.h / 2);
+      await session.touch('end', r.x + r.w / 2, r.y + r.h / 2);
+      await new Promise((res) => setTimeout(res, 300));
+      const after = (await session.analyze())!;
+      const dialog = after.issues.find((i) => i.rule === 'fold-straddle' && i.label?.startsWith('<div>') && i.detail.includes('대화상자'));
+      expect(dialog?.severity).toBe('high');
+    } finally {
+      await session.close();
+    }
+  });
+});
+
 describe('고친 데모 페이지', () => {
   it('높음 문제가 없다', async () => {
     const r = await captureDemo('?fixed', 'galaxy-z-fold7', ['folded', 'unfolded', 'book', 'split-right']);

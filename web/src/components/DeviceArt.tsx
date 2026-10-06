@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { Analysis, DeviceSpec, Insets, Issue, Layout, Rect } from '../../../shared/types';
+import type { Analysis, Corners, DeviceSpec, Insets, Issue, Layout, Rect } from '../../../shared/types';
 import { SEVERITY_COLOR, hostOf } from '../lib/format';
 
 /** 화면 좌표(CSS px) 기준으로 기기 그림을 그린다. 바깥 svg의 viewBox는 frameBox()를 쓴다. */
@@ -13,18 +13,36 @@ export function frameBox(device: DeviceSpec, layout: Layout) {
   return { x: -b, y: -b, w: layout.screen.w + b * 2, h: layout.screen.h + b * 2, b };
 }
 
-function roundedRectPath(x: number, y: number, w: number, h: number, r: number): string {
-  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+type Radii = number | Corners;
+
+function roundedRectPath(x: number, y: number, w: number, h: number, r: Radii): string {
+  const c = typeof r === 'number' ? { tl: r, tr: r, br: r, bl: r } : r;
+  const lim = (v: number) => Math.max(0, Math.min(v, w / 2, h / 2));
+  const tl = lim(c.tl);
+  const tr = lim(c.tr);
+  const br = lim(c.br);
+  const bl = lim(c.bl);
   return (
-    `M${x + rr},${y}H${x + w - rr}A${rr},${rr} 0 0 1 ${x + w},${y + rr}V${y + h - rr}` +
-    `A${rr},${rr} 0 0 1 ${x + w - rr},${y + h}H${x + rr}A${rr},${rr} 0 0 1 ${x},${y + h - rr}V${y + rr}` +
-    `A${rr},${rr} 0 0 1 ${x + rr},${y}Z`
+    `M${x + tl},${y}H${x + w - tr}A${tr},${tr} 0 0 1 ${x + w},${y + tr}V${y + h - br}` +
+    `A${br},${br} 0 0 1 ${x + w - br},${y + h}H${x + bl}A${bl},${bl} 0 0 1 ${x},${y + h - bl}V${y + tl}` +
+    `A${tl},${tl} 0 0 1 ${x + tl},${y}Z`
   );
+}
+
+function grow(c: Corners, d: number): Corners {
+  return { tl: c.tl + d, tr: c.tr + d, br: c.br + d, bl: c.bl + d };
 }
 
 function within(a: Rect | null, b: Rect): boolean {
   if (!a) return false;
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function isLight(color?: string): boolean {
+  const m = /^#([0-9a-f]{6})$/i.exec(color ?? '');
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  return ((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114 > 160;
 }
 
 export function DeviceDefs({ uid }: { uid: string }) {
@@ -70,9 +88,27 @@ export function DeviceDefs({ uid }: { uid: string }) {
   );
 }
 
-function StatusIcons({ bar, dark }: { bar: Rect; dark: boolean }) {
+function StatusIcons({ bar, dark, avoid = [] }: { bar: Rect; dark: boolean; avoid?: Rect[] }) {
   const color = dark ? '#111' : '#fff';
   const halo = dark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.4)';
+  const font = "Pretendard, 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif";
+  if (bar.h > bar.w) {
+    // 세로 상태 막대(아이폰 듀오): 다이내믹 아일랜드 아래에 시간과 배터리를 세로로 쌓는다
+    const cx = bar.x + bar.w / 2;
+    const below = Math.max(bar.y + 16, ...avoid.filter((r) => r.x < bar.x + bar.w && r.x + r.w > bar.x).map((r) => r.y + r.h + 18));
+    return (
+      <g pointerEvents="none">
+        <text x={cx} y={below} textAnchor="middle" dominantBaseline="central" fontSize={14} fontWeight={600} fill={color} stroke={halo} strokeWidth={2.5} paintOrder="stroke" fontFamily={font}>
+          9:41
+        </text>
+        <rect x={cx - 10} y={below + 16} width={20} height={10} rx={2.5} fill="none" stroke={color} strokeWidth={1.4} />
+        <rect x={cx - 8} y={below + 18} width={14} height={6} rx={1} fill={color} />
+        {[0, 1, 2, 3].map((i) => (
+          <rect key={i} x={cx - 9 + i * 4.5} y={below + 44 - (i + 1) * 2.4} width={3} height={(i + 1) * 2.4} rx={0.8} fill={color} />
+        ))}
+      </g>
+    );
+  }
   const cy = bar.y + bar.h / 2;
   const right = bar.x + bar.w - 16;
   const fs = Math.min(14, bar.h * 0.42);
@@ -88,7 +124,7 @@ function StatusIcons({ bar, dark }: { bar: Rect; dark: boolean }) {
         stroke={halo}
         strokeWidth={2.5}
         paintOrder="stroke"
-        fontFamily="Pretendard, 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif"
+        fontFamily={font}
       >
         9:41
       </text>
@@ -112,24 +148,38 @@ function StatusIcons({ bar, dark }: { bar: Rect; dark: boolean }) {
   );
 }
 
-function BrowserBar({ bar, url }: { bar: Rect; url: string }) {
-  const pillX = bar.x + 12;
-  const pillW = Math.max(60, bar.w - 12 - 76);
+function BrowserBar({ bar, url, ios }: { bar: Rect; url: string; ios: boolean }) {
   const cy = bar.y + bar.h / 2;
   const host = hostOf(url) || '주소';
+  const font = "Pretendard, 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif";
+  if (ios) {
+    // iOS 26+ 사파리: 아래쪽에 떠 있는 둥근 탭 바
+    const pillW = Math.min(bar.w - 92, 420);
+    const px = bar.x + (bar.w - pillW) / 2;
+    return (
+      <g pointerEvents="none">
+        <rect x={bar.x} y={bar.y} width={bar.w} height={bar.h} fill="#f4f4f6" />
+        <rect x={px} y={cy - 19} width={pillW} height={38} rx={19} fill="#ffffff" stroke="rgba(0,0,0,0.08)" />
+        <text x={px + pillW / 2} y={cy} textAnchor="middle" dominantBaseline="central" fontSize={14} fill="#1c1c1e" fontFamily={font}>
+          {host.length > Math.floor(pillW / 8) ? host.slice(0, Math.floor(pillW / 8) - 1) + '…' : host}
+        </text>
+        <circle cx={bar.x + 26} cy={cy} r={15} fill="#ffffff" stroke="rgba(0,0,0,0.08)" />
+        <path d={`M${bar.x + 29},${cy - 6} l-6,6 l6,6`} fill="none" stroke="#3a3a3c" strokeWidth={1.8} strokeLinecap="round" />
+        <circle cx={bar.x + bar.w - 26} cy={cy} r={15} fill="#ffffff" stroke="rgba(0,0,0,0.08)" />
+        {[0, 1, 2].map((i) => (
+          <circle key={i} cx={bar.x + bar.w - 32 + i * 6} cy={cy} r={1.6} fill="#3a3a3c" />
+        ))}
+      </g>
+    );
+  }
+  const pillX = bar.x + 12;
+  const pillW = Math.max(60, bar.w - 12 - 76);
   return (
     <g pointerEvents="none">
       <rect x={bar.x} y={bar.y} width={bar.w} height={bar.h} fill="#ffffff" />
       <rect x={pillX} y={cy - 18} width={pillW} height={36} rx={18} fill="#eef0f3" />
       <circle cx={pillX + 18} cy={cy} r={5} fill="none" stroke="#5f6368" strokeWidth={1.6} />
-      <text
-        x={pillX + 32}
-        y={cy}
-        dominantBaseline="central"
-        fontSize={14}
-        fill="#202124"
-        fontFamily="Pretendard, 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif"
-      >
+      <text x={pillX + 32} y={cy} dominantBaseline="central" fontSize={14} fill="#202124" fontFamily={font}>
         {host.length > Math.floor(pillW / 8) ? host.slice(0, Math.floor(pillW / 8) - 1) + '…' : host}
       </text>
       <rect x={bar.x + bar.w - 56} y={cy - 10} width={20} height={20} rx={4} fill="none" stroke="#3c4043" strokeWidth={1.8} />
@@ -150,16 +200,17 @@ export function DeviceBase({ device, layout, url, uid }: { device: DeviceSpec; l
   const { screen, viewport } = layout;
   const solidStatus = layout.statusBar && !within(layout.statusBar, viewport) ? layout.statusBar : null;
   const solidNav = layout.navBar && !within(layout.navBar, viewport) ? layout.navBar : null;
+  const light = isLight(device.frameColor);
   return (
     <g>
-      <path d={roundedRectPath(box.x, box.y, box.w, box.h, screen.radius + box.b * 0.8)} fill={device.frameColor ?? '#1c1f26'} />
+      <path d={roundedRectPath(box.x, box.y, box.w, box.h, grow(screen.corners, box.b * 0.8))} fill={device.frameColor ?? '#1c1f26'} />
       <path
-        d={roundedRectPath(box.x + 1, box.y + 1, box.w - 2, box.h - 2, screen.radius + box.b * 0.8 - 1)}
+        d={roundedRectPath(box.x + 1, box.y + 1, box.w - 2, box.h - 2, grow(screen.corners, box.b * 0.8 - 1))}
         fill="none"
-        stroke="rgba(255,255,255,0.18)"
+        stroke={light ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.18)'}
         strokeWidth={1.2}
       />
-      <path d={roundedRectPath(0, 0, screen.w, screen.h, screen.radius)} fill="#000" />
+      <path d={roundedRectPath(0, 0, screen.w, screen.h, screen.corners)} fill="#000" />
       {layout.otherApp && (
         <g>
           <rect x={layout.otherApp.x} y={layout.otherApp.y} width={layout.otherApp.w} height={layout.otherApp.h} fill={`url(#${uid}-stripes)`} />
@@ -177,8 +228,8 @@ export function DeviceBase({ device, layout, url, uid }: { device: DeviceSpec; l
         </g>
       )}
       {solidStatus && <rect x={solidStatus.x} y={solidStatus.y} width={solidStatus.w} height={solidStatus.h} fill="#ffffff" />}
-      {solidStatus && <StatusIcons bar={solidStatus} dark />}
-      {layout.browserBar && <BrowserBar bar={layout.browserBar} url={url} />}
+      {solidStatus && <StatusIcons bar={solidStatus} dark avoid={layout.cutouts} />}
+      {layout.browserBar && <BrowserBar bar={layout.browserBar} url={url} ios={device.platform === 'ios'} />}
       {solidNav && <rect x={solidNav.x} y={solidNav.y} width={solidNav.w} height={solidNav.h} fill="#ffffff" />}
     </g>
   );
@@ -211,8 +262,8 @@ export function DeviceTop({
 }) {
   const box = frameBox(device, layout);
   const { screen, viewport } = layout;
-  const ring =
-    roundedRectPath(box.x, box.y, box.w, box.h, screen.radius + box.b * 0.8) + roundedRectPath(0, 0, screen.w, screen.h, screen.radius);
+  const ring = roundedRectPath(box.x, box.y, box.w, box.h, grow(screen.corners, box.b * 0.8)) + roundedRectPath(0, 0, screen.w, screen.h, screen.corners);
+  const ios = device.platform === 'ios';
   const overlayStatus = layout.statusBar && within(layout.statusBar, viewport) ? layout.statusBar : null;
   const nav = layout.navBar;
   const halfOpen = layout.devicePosture === 'folded';
@@ -251,15 +302,15 @@ export function DeviceTop({
         );
       })}
       <SplitHandle layout={layout} />
-      {overlayStatus && <StatusIcons bar={overlayStatus} dark />}
+      {overlayStatus && <StatusIcons bar={overlayStatus} dark avoid={layout.cutouts} />}
       {nav && (
         <rect
-          x={nav.x + nav.w / 2 - 54}
-          y={nav.y + nav.h / 2 - 2}
-          width={108}
-          height={4}
-          rx={2}
-          fill="rgba(20,20,20,0.75)"
+          x={nav.x + nav.w / 2 - (ios ? 67 : 54)}
+          y={nav.y + nav.h - (ios ? 13 : nav.h / 2 + 2)}
+          width={ios ? 134 : 108}
+          height={ios ? 5 : 4}
+          rx={2.5}
+          fill="rgba(20,20,20,0.78)"
           stroke="rgba(255,255,255,0.6)"
           strokeWidth={0.8}
         />
@@ -468,5 +519,12 @@ export function DebugOverlay({
     });
   }
 
-  return <g pointerEvents="none">{parts}</g>;
+  return (
+    <g pointerEvents="none">
+      <clipPath id={`${uid}-vp`}>
+        <rect x={vp.x} y={vp.y} width={vp.w} height={vp.h} />
+      </clipPath>
+      <g clipPath={`url(#${uid}-vp)`}>{parts}</g>
+    </g>
+  );
 }

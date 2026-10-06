@@ -891,3 +891,130 @@ button:disabled {
     height: 68vh;
   }
 }
+
+/* ---------- 기기 직접 만들기 ---------- */
+
+.custom-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(31, 35, 41, 0.38);
+}
+
+.modal {
+  width: min(860px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 20px;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+}
+
+.modal header,
+.modal footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.modal footer {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.modal h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.custom-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.custom-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  align-content: start;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.form-field.wide {
+  grid-column: 1 / -1;
+}
+
+.form-field input,
+.form-field select {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.custom-previews {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #f6f3ec;
+}
+
+.custom-preview {
+  width: 100%;
+  max-height: 220px;
+}
+
+.json-import {
+  margin-top: 14px;
+  font-size: 13px;
+}
+
+.json-import summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.json-import textarea {
+  display: block;
+  width: 100%;
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .custom-grid {
+    grid-template-columns: 1fr;
+  }
+}
