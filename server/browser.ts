@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { chromium, type Browser } from 'playwright';
+import { chromium, webkit, type Browser } from 'playwright';
 import { config } from './config';
 
 const ARGS = ['--disable-dev-shm-usage', '--hide-scrollbars', '--mute-audio', '--no-first-run', '--no-default-browser-check'];
@@ -25,8 +25,45 @@ export function getBrowser(): Promise<Browser> {
 
 export async function closeBrowser(): Promise<void> {
   const p = browserPromise;
+  const w = webkitPromise;
   browserPromise = null;
-  if (p) await (await p).close().catch(() => {});
+  webkitPromise = null;
+  await Promise.all([p, w].map(async (b) => (await b?.catch(() => null))?.close().catch(() => {})));
+}
+
+// ---------- WebKit(사파리 엔진) ----------
+
+let webkitPromise: Promise<Browser> | null = null;
+
+/** Playwright WebKit이 설치돼 있는지. FOLDLAB_WEBKIT=0이면 쓰지 않는다. */
+export function webkitInstalled(): boolean {
+  if (/^(0|false|off|no)$/i.test(process.env.FOLDLAB_WEBKIT ?? '')) return false;
+  try {
+    return existsSync(webkit.executablePath());
+  } catch {
+    return false;
+  }
+}
+
+export function getWebKit(): Promise<Browser> {
+  if (!webkitPromise) {
+    webkitPromise = webkit
+      .launch()
+      .then((b) => {
+        b.on('disconnected', () => {
+          webkitPromise = null;
+        });
+        return b;
+      })
+      .catch((err: Error) => {
+        webkitPromise = null;
+        throw new Error(
+          'WebKit을 실행하지 못했습니다. `npx playwright install webkit`(리눅스는 `--with-deps`를 붙여서)을 실행한 뒤 서버를 다시 켜 주세요. ' +
+            String(err.message).split('\n')[0],
+        );
+      });
+  }
+  return webkitPromise;
 }
 
 async function launch(): Promise<Browser> {

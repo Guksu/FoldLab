@@ -24,7 +24,7 @@ import { DEFAULT_DEVICE_ID, DEVICES } from '../../shared/devices';
 import { computeLayout, resolveFit } from '../../shared/geometry';
 import type { CustomParams } from '../../shared/custom';
 import type { MeasureSnapshot, MeasureUrl } from '../../shared/measure';
-import type { CaptureResult, SessionState } from '../../shared/protocol';
+import type { CaptureResult, Engine, SessionState } from '../../shared/protocol';
 import type { Analysis, DeviceKind, DeviceSpec, DisplayMode, FitPolicy } from '../../shared/types';
 import { CustomDeviceDialog } from './components/CustomDeviceDialog';
 import type { OverlayToggles } from './components/DeviceArt';
@@ -76,6 +76,8 @@ interface Saved {
   fit?: FitPolicy;
   toggles?: OverlayToggles;
   debug?: boolean;
+  /** 아이폰 기기를 그릴 엔진 */
+  iosEngine?: Engine;
 }
 
 interface Toast {
@@ -136,6 +138,8 @@ export function App() {
   const client = useMemo(() => new FoldLabClient(), []);
   const [conn, setConn] = useState<ConnectionStatus>('idle');
   const [browserVersion, setBrowserVersion] = useState('');
+  const [webkitAvailable, setWebkitAvailable] = useState(false);
+  const [iosEngine, setIosEngine] = useState<Engine>(saved.iosEngine ?? 'webkit');
   const [urlInput, setUrlInput] = useState(params.get('url') ?? saved.url ?? '');
   const [customDevices, setCustomDevices] = useState<DeviceSpec[]>(loadCustomDevices);
   const allDevices = useMemo(() => [...DEVICES, ...customDevices], [customDevices]);
@@ -177,11 +181,23 @@ export function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ url: urlInput, deviceId, postureId: validPosture, mode, fit, toggles, debug } satisfies Saved));
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ url: urlInput, deviceId, postureId: validPosture, mode, fit, toggles, debug, iosEngine } satisfies Saved),
+      );
     } catch {
       /* 저장소를 못 쓰는 환경 */
     }
-  }, [urlInput, deviceId, validPosture, mode, fit, toggles, debug]);
+  }, [urlInput, deviceId, validPosture, mode, fit, toggles, debug, iosEngine]);
+
+  /**
+   * 아이폰 기기는 사용자가 고르면 사파리 엔진으로 그린다.
+   * 서버 정보(hello)를 받기 전에 열어도 같은 엔진이 되도록 고른 값을 그대로 보내고, WebKit이 없으면 서버가 크로미움으로 그린다.
+   */
+  const engineFor = useCallback(
+    (d: DeviceSpec, pref: Engine = iosEngine): Engine => (d.platform === 'ios' && pref === 'webkit' ? 'webkit' : 'chromium'),
+    [iosEngine],
+  );
 
   useEffect(() => {
     const offStatus = client.on('status', (st) => {
@@ -198,6 +214,7 @@ export function App() {
       switch (m.t) {
         case 'hello':
           setBrowserVersion(m.browser);
+          setWebkitAvailable(!!m.engines?.webkit);
           break;
         case 'state':
           setSession(m.state);
@@ -244,9 +261,9 @@ export function App() {
       if (!target) return;
       setUrlInput(target);
       setAnalysis(null);
-      client.send({ t: 'open', url: target, device, postureId: validPosture, mode, fit });
+      client.send({ t: 'open', url: target, device, postureId: validPosture, mode, fit, engine: engineFor(device) });
     },
-    [client, device, validPosture, mode, fit],
+    [client, device, validPosture, mode, fit, engineFor],
   );
 
   // ?url= 로 들어오면 바로 연다
@@ -257,7 +274,7 @@ export function App() {
     if (params.get('url')) open(params.get('url')!);
   }, [open, params]);
 
-  const configure = (next: { device?: DeviceSpec; postureId?: string; mode?: DisplayMode; fit?: FitPolicy }) => {
+  const configure = (next: { device?: DeviceSpec; postureId?: string; mode?: DisplayMode; fit?: FitPolicy; engine?: Engine }) => {
     if (session) client.send({ t: 'configure', ...next });
   };
 
@@ -273,7 +290,12 @@ export function App() {
     setPostureId(pid);
     setSheetPostures(next.postures.filter((p) => p.sheet).map((p) => p.id));
     setCapture(null);
-    configure({ device: next, postureId: pid });
+    configure({ device: next, postureId: pid, engine: engineFor(next) });
+  };
+
+  const changeEngine = (e: Engine) => {
+    setIosEngine(e);
+    configure({ engine: engineFor(device, e) });
   };
 
   const changePosture = (id: string) => {
@@ -391,8 +413,13 @@ export function App() {
   };
 
   const demoUrl = `${location.origin}/demo/trip`;
-  const connText =
-    conn === 'open' ? (browserVersion ? `Chromium ${browserVersion.split('.')[0]}` : '연결됨') : conn === 'closed' ? '서버 연결 끊김' : '연결 중';
+  const engineText =
+    session?.engine === 'webkit'
+      ? `WebKit ${session.engineVersion}`
+      : browserVersion
+        ? `Chromium ${browserVersion.split('.')[0]}`
+        : '연결됨';
+  const connText = conn === 'open' ? engineText : conn === 'closed' ? '서버 연결 끊김' : '연결 중';
 
   return (
     <div className="app">
@@ -490,6 +517,30 @@ export function App() {
             ]}
           />
         </div>
+        {device.platform === 'ios' && (
+          <>
+            <span className="vsep" aria-hidden />
+            <div className="tool-group">
+              <span className="field-label">엔진</span>
+              <Segmented<Engine>
+                label="렌더링 엔진"
+                value={webkitAvailable ? engineFor(device) : 'chromium'}
+                onChange={changeEngine}
+                options={[
+                  { value: 'chromium', label: '크로미움', hint: '크로미움에 아이폰 화면 크기·UA·안전 영역만 흉내 냅니다' },
+                  {
+                    value: 'webkit',
+                    label: 'WebKit',
+                    hint: webkitAvailable
+                      ? '사파리와 같은 WebKit 엔진으로 그립니다'
+                      : 'WebKit이 설치되지 않았습니다. npx playwright install webkit 후 서버를 다시 켜 주세요',
+                    disabled: !webkitAvailable,
+                  },
+                ]}
+              />
+            </div>
+          </>
+        )}
         <span className="vsep" aria-hidden />
         <label className="tool-group">
           <span className="field-label code">viewport-fit</span>
@@ -575,7 +626,7 @@ export function App() {
                   <div>
                     <h1>주소를 열면 이 기기 화면 그대로 보여 드려요</h1>
                     <p>
-                      접힘·펼침·반 접힘·화면 분할 자세를 실제 크롬 엔진으로 재현하고, 접는 선·카메라 홀·시스템 바에 걸린 요소를 찾아 줍니다.
+                      접힘·펼침·반 접힘·화면 분할 자세를 실제 브라우저 엔진으로 재현하고, 접는 선·카메라 홀·시스템 바에 걸린 요소를 찾아 줍니다.
                     </p>
                     <div className="welcome-actions">
                       <Button variant="primary" size="sm" icon={Play} onClick={() => open(demoUrl)}>
@@ -594,6 +645,8 @@ export function App() {
             analysis={liveAnalysis}
             layout={live ? layout : null}
             support={session?.support ?? null}
+            engine={session?.engine ?? 'chromium'}
+            engineVersion={session?.engineVersion ?? ''}
             selectedId={selectedId}
             numbering={numbering}
             postureName={postureLabel(device, activePosture)}

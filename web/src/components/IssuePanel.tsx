@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { ChevronRight, CircleCheck, Crosshair, Lightbulb, RefreshCw, ScanSearch, TriangleAlert } from 'lucide-react';
+import { ChevronRight, CircleCheck, Crosshair, Info, Lightbulb, RefreshCw, ScanSearch, TriangleAlert } from 'lucide-react';
 import { RULES, SEVERITY_LABEL, SEVERITY_ORDER } from '../../../shared/rules';
-import type { EmulationSupport } from '../../../shared/protocol';
+import type { EmulationSupport, Engine } from '../../../shared/protocol';
 import type { Analysis, Insets, Layout, Severity } from '../../../shared/types';
 import { SEVERITY_COLOR } from '../lib/format';
 import { Button, IconButton } from './ui';
@@ -10,6 +10,8 @@ interface Props {
   analysis: Analysis | null;
   layout: Layout | null;
   support: EmulationSupport | null;
+  engine: Engine;
+  engineVersion: string;
   selectedId: string | null;
   numbering: Map<string, number>;
   postureName: string;
@@ -23,13 +25,16 @@ function insetText(i: Insets) {
   return `${i.top} / ${i.right} / ${i.bottom} / ${i.left}`;
 }
 
-export function IssuePanel({ analysis, layout, support, selectedId, numbering, postureName, onSelect, onReveal, onReanalyze, live }: Props) {
+export function IssuePanel(props: Props) {
+  const { analysis, layout, support, engine, engineVersion, selectedId, numbering, postureName, onSelect, onReveal, onReanalyze, live } = props;
+  const webkit = engine === 'webkit';
   const [filter, setFilter] = useState<Severity | null>(null);
   const fresh = analysis && layout && analysis.postureId === layout.postureId ? analysis : null;
   const env = fresh?.env;
   const issues = fresh ? (filter ? fresh.issues.filter((i) => i.severity === filter) : fresh.issues) : [];
+  // WebKit은 사파리처럼 화면 분할·자세 API가 원래 없으므로 '미지원' 경고 대상이 아니다
   const unsupported =
-    support && (support.segments === 'unsupported' || support.posture === 'unsupported' || support.safeArea === 'unsupported');
+    !webkit && support && (support.segments === 'unsupported' || support.posture === 'unsupported' || support.safeArea === 'unsupported');
 
   return (
     <aside className="inspector" aria-label="검사 결과">
@@ -149,6 +154,7 @@ export function IssuePanel({ analysis, layout, support, selectedId, numbering, p
             <summary>
               <ChevronRight size={14} aria-hidden />
               에뮬레이션 정보
+              {webkit && <span className="badge badge-neutral">WebKit</span>}
               {unsupported && (
                 <span className="badge badge-warn">
                   <TriangleAlert size={12} aria-hidden />
@@ -157,6 +163,8 @@ export function IssuePanel({ analysis, layout, support, selectedId, numbering, p
               )}
             </summary>
             <dl>
+              <dt>엔진</dt>
+              <dd>{webkit ? `WebKit ${engineVersion} (사파리 엔진)` : `Chromium ${engineVersion}`}</dd>
               <dt>뷰포트</dt>
               <dd>
                 {layout.viewport.w}×{layout.viewport.h} · DPR {layout.dpr}
@@ -175,13 +183,15 @@ export function IssuePanel({ analysis, layout, support, selectedId, numbering, p
               </dd>
               <dt>세그먼트</dt>
               <dd>
-                {layout.displayFeature
-                  ? `${layout.displayFeature.orientation === 'vertical' ? '좌우' : '위아래'} 2개 · 마스크 ${layout.displayFeature.maskLength}px`
-                  : '1개'}
+                {webkit
+                  ? '1개 (사파리 미지원)'
+                  : layout.displayFeature
+                    ? `${layout.displayFeature.orientation === 'vertical' ? '좌우' : '위아래'} 2개 · 마스크 ${layout.displayFeature.maskLength}px`
+                    : '1개'}
                 {env && env.segments.length > 1 && ' ✓'}
               </dd>
               <dt>device-posture</dt>
-              <dd>{env?.posture ?? layout.devicePosture}</dd>
+              <dd>{webkit ? (env?.posture ?? '없음 (사파리 미지원)') : (env?.posture ?? layout.devicePosture)}</dd>
               {env && (
                 <>
                   <dt>meta viewport</dt>
@@ -189,6 +199,15 @@ export function IssuePanel({ analysis, layout, support, selectedId, numbering, p
                 </>
               )}
             </dl>
+            {webkit && (
+              <p className="callout callout-info">
+                <Info size={14} aria-hidden />
+                <span>
+                  사파리와 같은 WebKit 엔진으로 그리는 중입니다. 사파리에는 화면 분할·자세 API가 없어 실제 아이폰처럼 쓰지 않습니다. 안전 영역은
+                  페이지 CSS의 env()를 바꿔 넣어 흉내 냅니다.
+                </span>
+              </p>
+            )}
             {unsupported && (
               <p className="callout callout-warn">
                 <TriangleAlert size={14} aria-hidden />

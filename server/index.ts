@@ -5,7 +5,7 @@ import express from 'express';
 import { WebSocket, WebSocketServer } from 'ws';
 import { encodeFrame, type ClientMessage, type ServerMessage } from '../shared/protocol';
 import { validateDevice } from '../shared/validate';
-import { closeBrowser, getBrowser } from './browser';
+import { closeBrowser, getBrowser, webkitInstalled } from './browser';
 import { config } from './config';
 import { MeasureHub } from './measure';
 import { LiveSession, type SessionSink } from './session';
@@ -85,7 +85,7 @@ wss.on('connection', (ws: WebSocket, req) => {
   const fail = (err: unknown) => sink.json({ t: 'error', message: String((err as Error)?.message ?? err) });
 
   void getBrowser()
-    .then((b) => sink.json({ t: 'hello', browser: b.version(), version: VERSION }))
+    .then((b) => sink.json({ t: 'hello', browser: b.version(), version: VERSION, engines: { webkit: webkitInstalled() } }))
     .catch(fail);
 
   const handle = async (msg: ClientMessage) => {
@@ -96,13 +96,20 @@ wss.on('connection', (ws: WebSocket, req) => {
     if (msg.t === 'open') {
       if (!session) {
         if (sessions.size >= config.maxSessions) throw new Error(`동시 세션은 ${config.maxSessions}개까지입니다. 잠시 뒤 다시 시도하세요.`);
-        const browser = await getBrowser();
-        const s = new LiveSession(browser, sink, { device: msg.device, postureId: msg.postureId, mode: msg.mode, fit: msg.fit });
+        const s = new LiveSession(sink, { device: msg.device, postureId: msg.postureId, mode: msg.mode, fit: msg.fit, engine: msg.engine });
         sessions.add(s);
         session = s;
-        await s.start();
+        try {
+          await s.start();
+        } catch (err) {
+          // 엔진을 띄우지 못하면(WebKit 미설치 등) 세션을 버려 다음 열기에서 다시 만든다
+          sessions.delete(s);
+          session = null;
+          await s.close().catch(() => {});
+          throw err;
+        }
       } else {
-        await session.configure({ device: msg.device, postureId: msg.postureId, mode: msg.mode, fit: msg.fit });
+        await session.configure({ device: msg.device, postureId: msg.postureId, mode: msg.mode, fit: msg.fit, engine: msg.engine });
       }
       await session.navigate(msg.url);
       return;

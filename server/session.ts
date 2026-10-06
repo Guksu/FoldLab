@@ -1,19 +1,15 @@
-import type { Browser, BrowserContext, CDPSession, Page } from 'playwright';
+import type { Page } from 'playwright';
 import type { AnalyzeInput, AnalyzeOutput, ContinuityFinding } from '../inpage/analyze';
-import { computeLayout, findPosture, findScreen, parseViewportFit, resolveFit, screenOrientation } from '../shared/geometry';
-import type {
-  CaptureItem,
-  CaptureResult,
-  EmulationSupport,
-  FrameHeader,
-  ServerMessage,
-  SessionState,
-} from '../shared/protocol';
+import { computeLayout, findPosture, parseViewportFit, resolveFit } from '../shared/geometry';
+import type { CaptureItem, CaptureResult, Engine, FrameHeader, ServerMessage, SessionState } from '../shared/protocol';
 import { RULES } from '../shared/rules';
 import type { Analysis, DeviceSpec, DisplayMode, FitPolicy, Issue, Layout, Severity, ViewportFit } from '../shared/types';
+import { webkitInstalled } from './browser';
 import { config } from './config';
+import { ChromiumDriver } from './engines/chromium';
+import type { DriverHooks, EngineDriver, TouchPhase } from './engines/types';
+import { WebKitDriver } from './engines/webkit';
 import { normalizeUrl, resolvesToPrivate } from './guard';
-import { getAnalyzerSource, getHooksSource } from './inpage';
 
 export interface SessionSink {
   json(msg: ServerMessage): void;
@@ -26,33 +22,30 @@ export interface SessionOptions {
   postureId: string;
   mode: DisplayMode;
   fit: FitPolicy;
+  engine?: Engine;
 }
-
-/** 캡처 해상도: 뷰포트 CSS px의 2배 */
-const CAPTURE_SCALE = 2;
-const SCREENCAST_SCALE = 2;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** WebKit이 없는 서버면 크로미움으로 그린다(UI는 서버 정보를 받기 전에도 고른 엔진을 보낸다) */
+function usableEngine(engine: Engine): Engine {
+  return engine === 'webkit' && !webkitInstalled() ? 'chromium' : engine;
+}
+
 /**
  * 웹소켓 연결 하나에 대응하는 헤드리스 페이지.
- * 기기 자세를 CDP 에뮬레이션(뷰포트·화면 분할·자세·안전 영역)으로 재현하고 화면을 스트리밍한다.
+ * 엔진마다 다른 부분(에뮬레이션·화면 프레임·입력·캡처)은 드라이버가 맡고,
+ * 여기서는 분석·자세 전환 연속성·비교 시트·상태 전송 같은 공통 흐름을 맡는다.
  */
 export class LiveSession {
-  private context!: BrowserContext;
-  private page!: Page;
-  private cdp!: CDPSession;
+  private driver: EngineDriver;
   private device: DeviceSpec;
   private postureId: string;
   private mode: DisplayMode;
   private fit: FitPolicy;
   private pageFit: ViewportFit = 'auto';
   private layout!: Layout;
-  private support: EmulationSupport = { segments: 'none', posture: 'ok', safeArea: 'ok' };
-  private worldId: number | null = null;
   private loading = false;
-  private screencastKey = '';
-  private uaKey = '';
   private seq = 0;
   private analyzeTimer: NodeJS.Timeout | null = null;
   private analyzeDeadline = 0;
@@ -66,7 +59,6 @@ export class LiveSession {
   lastActive = Date.now();
 
   constructor(
-    private readonly browser: Browser,
     private readonly sink: SessionSink,
     opts: SessionOptions,
   ) {
@@ -74,70 +66,83 @@ export class LiveSession {
     this.postureId = findPosture(opts.device, opts.postureId).id;
     this.mode = opts.mode;
     this.fit = opts.fit;
+    this.driver = this.createDriver(usableEngine(opts.engine ?? 'chromium'));
   }
 
   get busy(): boolean {
     return this.capturing;
   }
 
-  async start(): Promise<void> {
-    this.context = await this.browser.newContext({
-      viewport: null,
-      acceptDownloads: false,
-      ignoreHTTPSErrors: true,
-      locale: 'ko-KR',
-      timezoneId: 'Asia/Seoul',
-    });
-    if (!config.allowPrivateNetwork) {
-      await this.context.route('**/*', async (route) => {
-        const url = new URL(route.request().url());
-        if ((url.protocol === 'http:' || url.protocol === 'https:') && (await resolvesToPrivate(url.hostname))) {
-          return route.abort('blockedbyclient');
-        }
-        return route.continue();
-      });
-    }
-    this.page = await this.context.newPage();
-    this.cdp = await this.context.newCDPSession(this.page);
-    await this.cdp.send('Page.enable');
-    const hooks = await getHooksSource();
-    if (hooks) await this.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: hooks });
-    // 새 문서의 navigator.devicePosture는 처음 만들어질 때 재정의 값을 무시하므로 문서 시작 때 미리 만들어 둔다.
-    // 페이지의 API 사용 감지(hooks)에 걸리지 않게 격리된 월드에서 건드린다.
-    await this.cdp.send('Page.addScriptToEvaluateOnNewDocument', {
-      source: 'void (navigator.devicePosture && navigator.devicePosture.type);',
-      worldName: 'foldlab-posture',
-    } as never);
-    await this.cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  get engine(): Engine {
+    return this.driver.engine;
+  }
 
-    this.cdp.on('Page.screencastFrame', (f) => this.onFrame(f));
-    this.page.on('framenavigated', (frame) => {
-      if (frame !== this.page.mainFrame()) return;
-      this.worldId = null;
+  private get page(): Page {
+    return this.driver.page;
+  }
+
+  private createDriver(engine: Engine): EngineDriver {
+    const hooks: DriverHooks = {
+      attach: (page) => this.attach(page),
+      frame: (meta, jpeg) =>
+        new Promise<void>((resolve) => {
+          if (this.closed) return resolve();
+          this.sink.frame({ ...meta, seq: ++this.seq }, jpeg, resolve);
+          // 화면이 바뀌었으니 조용해지면 다시 분석한다
+          if (!this.touching) this.scheduleAnalyze(900, 4000);
+        }),
+    };
+    return engine === 'webkit' ? new WebKitDriver(hooks) : new ChromiumDriver(hooks);
+  }
+
+  /** 드라이버가 만든 페이지에 이벤트를 붙인다. WebKit은 기기를 바꾸면 페이지를 새로 만들어 다시 불린다. */
+  private attach(page: Page): void {
+    page.on('framenavigated', (frame) => {
+      if (frame !== page.mainFrame() || page !== this.page) return;
       if (!this.capturing) this.continuity = null;
-      void this.reapplyPosture();
+      this.driver.documentChanged(frame.url());
       void this.pushState();
     });
-    this.page.on('domcontentloaded', () => void this.onDocumentReady());
-    this.page.on('load', () => {
+    page.on('domcontentloaded', () => void this.onDocumentReady());
+    page.on('load', () => {
       void this.onDocumentReady();
       this.scheduleAnalyze(400);
     });
-    this.page.on('dialog', (d) => {
+    page.on('dialog', (d) => {
       this.sink.json({ t: 'dialog', kind: d.type(), message: d.message() });
       // confirm은 취소로 돌려 의도치 않은 동작(삭제 등)을 막는다
       void (d.type() === 'alert' || d.type() === 'beforeunload' ? d.accept() : d.dismiss()).catch(() => {});
     });
-    this.page.on('popup', (popup) => void this.adoptPopup(popup));
-    this.page.on('crash', () => this.sink.json({ t: 'error', message: '페이지가 비정상 종료됐습니다. 다시 열어 주세요.' }));
+    page.on('popup', (popup) => void this.adoptPopup(popup));
+    page.on('crash', () => this.sink.json({ t: 'error', message: '페이지가 비정상 종료됐습니다. 다시 열어 주세요.' }));
+  }
 
-    await this.applyEmulation();
+  private computeLayout(): Layout {
+    return computeLayout(this.device, this.postureId, { mode: this.mode, fit: this.effectiveFit() });
+  }
+
+  async start(): Promise<void> {
+    this.layout = this.computeLayout();
+    await this.startDriver();
     await this.pushState();
+  }
+
+  /** 드라이버를 띄운다. WebKit을 띄우지 못하면 크로미움으로 대신 그리고 이유를 알린다. */
+  private async startDriver(): Promise<void> {
+    try {
+      await this.driver.start(this.device, this.layout);
+    } catch (err) {
+      if (this.driver.engine === 'chromium' || this.closed) throw err;
+      await this.driver.close().catch(() => {});
+      this.sink.json({ t: 'error', message: `WebKit 대신 크로미움으로 그립니다. ${String((err as Error)?.message ?? err)}` });
+      this.driver = this.createDriver('chromium');
+      await this.driver.start(this.device, this.layout);
+    }
   }
 
   // ---------- 설정 ----------
 
-  async configure(next: { device?: DeviceSpec; postureId?: string; mode?: DisplayMode; fit?: FitPolicy }): Promise<void> {
+  async configure(next: { device?: DeviceSpec; postureId?: string; mode?: DisplayMode; fit?: FitPolicy; engine?: Engine }): Promise<void> {
     const platformChanged = !!next.device && next.device.platform !== this.device.platform;
     const from = this.postureId;
     const sameDevice = !next.device || next.device.id === this.device.id;
@@ -145,226 +150,57 @@ export class LiveSession {
     if (next.postureId || next.device) this.postureId = findPosture(this.device, next.postureId ?? this.postureId).id;
     if (next.mode) this.mode = next.mode;
     if (next.fit) this.fit = next.fit;
+    const engine = next.engine && usableEngine(next.engine);
+    if (engine && engine !== this.driver.engine) {
+      await this.switchEngine(engine);
+      return;
+    }
     // 같은 기기에서 자세만 바꾸면 실제 기기처럼 상태가 이어지는지 함께 본다
     const transition = sameDevice && from !== this.postureId ? await this.beginTransition() : null;
-    await this.applyEmulation();
+    const reopened = await this.applyEmulation();
     await this.pushState();
-    if (transition) {
+    if (transition && !reopened) {
       await this.settle();
       const issues = await this.endTransition(transition, from, this.postureId);
       this.continuity = { postureId: this.postureId, issues };
     } else if (!sameDevice) {
       this.continuity = null;
     }
-    if (platformChanged && this.page.url().startsWith('http')) {
+    if (platformChanged && !reopened && this.page.url().startsWith('http')) {
       // UA가 크게 바뀌면 서버 렌더링 결과도 달라질 수 있어 새로 불러온다
       await this.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
     }
     this.scheduleAnalyze(350);
   }
 
+  /** 엔진을 바꾼다: 새 엔진으로 페이지를 다시 만들고 같은 주소를 연다(페이지 상태는 이어지지 않는다) */
+  private async switchEngine(engine: Engine): Promise<void> {
+    const url = this.page?.url() ?? '';
+    const old = this.driver;
+    this.driver = this.createDriver(engine);
+    this.continuity = null;
+    this.pageFit = 'auto';
+    await old.close().catch(() => {});
+    this.layout = this.computeLayout();
+    await this.startDriver();
+    await this.pushState();
+    if (url.startsWith('http')) await this.navigate(url);
+  }
+
   private effectiveFit(): ViewportFit {
     return resolveFit(this.device, this.mode, this.fit, this.pageFit);
   }
 
-  /**
-   * 크롬은 새 문서의 navigator.devicePosture에 재정의 값을 넘겨주지 않는다(CSS device-posture는 그대로).
-   * 같은 값을 다시 걸면 무시되므로 지웠다가 다시 건다. 문서 시작 때 객체를 만들어 두었으니 페이지 스크립트보다 먼저 반영된다.
-   */
-  private async reapplyPosture(): Promise<void> {
-    if (this.closed || !this.layout || this.support.posture !== 'ok') return;
-    const type = this.layout.devicePosture;
-    await this.cdp.send('Emulation.clearDevicePostureOverride' as never).catch(() => {});
-    await this.cdp.send('Emulation.setDevicePostureOverride' as never, { posture: { type } } as never).catch(() => {});
-  }
-
-  private async applyEmulation(): Promise<void> {
-    const layout = computeLayout(this.device, this.postureId, { mode: this.mode, fit: this.effectiveFit() });
-    const widthChanged = !this.layout || this.layout.viewport.w !== layout.viewport.w;
-    this.layout = layout;
-    const vp = layout.viewport;
-    const posture = findPosture(this.device, this.postureId);
-    const screen = findScreen(this.device, posture.screen);
-
-    const metrics: Record<string, unknown> = {
-      width: vp.w,
-      height: vp.h,
-      deviceScaleFactor: layout.dpr,
-      mobile: true,
-      screenWidth: layout.screen.w,
-      screenHeight: layout.screen.h,
-      positionX: vp.x,
-      positionY: vp.y,
-      screenOrientation: screenOrientation(layout.rotation, screen.height >= screen.width),
-    };
-    // 화면 분할은 setDisplayFeaturesOverride가 아니라 이 (deprecated) 인자로만 반영된다.
-    // 크롬 121~148은 이 호출 때마다 자세를 이 값으로 다시 밀어 넣으므로 자세도 함께 준다.
-    if (layout.displayFeature) metrics.displayFeature = layout.displayFeature;
-    metrics.devicePosture = { type: layout.devicePosture };
-    await this.cdp.send('Emulation.setDeviceMetricsOverride', metrics as never);
-
-    await this.applyUserAgent();
-    if (widthChanged) await this.normalizePageScale();
-
-    // JS(navigator.devicePosture)까지 바꾸려면 별도 명령이 필요하다. 크기 변경이 끝난 뒤에 건다.
-    try {
-      await this.cdp.send('Emulation.setDevicePostureOverride' as never, { posture: { type: layout.devicePosture } } as never);
-      this.support.posture = 'ok';
-    } catch {
-      this.support.posture = 'unsupported';
+  /** 레이아웃을 드라이버에 건다. WebKit이 페이지를 새로 만들었으면 보던 주소를 다시 열고 true를 돌려준다. */
+  private async applyEmulation(): Promise<boolean> {
+    const url = this.page?.url() ?? '';
+    this.layout = this.computeLayout();
+    const result = await this.driver.apply(this.device, this.layout);
+    if (result === 'reopened' && url.startsWith('http')) {
+      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => {});
+      return true;
     }
-
-    // 값을 빼면 env()가 정의되지 않은 상태가 되므로 8개를 모두 넘긴다
-    const ins = layout.insets;
-    const max = layout.maxInsets;
-    try {
-      await this.cdp.send(
-        'Emulation.setSafeAreaInsetsOverride' as never,
-        {
-          insets: {
-            top: ins.top,
-            topMax: Math.max(ins.top, max.top),
-            right: ins.right,
-            rightMax: Math.max(ins.right, max.right),
-            bottom: ins.bottom,
-            bottomMax: Math.max(ins.bottom, max.bottom),
-            left: ins.left,
-            leftMax: Math.max(ins.left, max.left),
-          },
-        } as never,
-      );
-      this.support.safeArea = 'ok';
-    } catch {
-      this.support.safeArea = 'unsupported';
-    }
-
-    await this.verifySegments();
-    await this.ensureScreencast();
-  }
-
-  /**
-   * 에뮬레이션 크기를 바꾸면 크롬이 이전 배율(줌)을 그대로 끌고 와 화면이 확대된 채 남는다(예: 1.74배).
-   * 새 폭에서 처음 연 것과 같도록 페이지 배율을 viewport 메타의 초기 배율로 맞춘다.
-   */
-  private async normalizePageScale(): Promise<void> {
-    if (!this.page.url().startsWith('http')) return;
-    const vpW = this.layout.viewport.w;
-    const res = await this.cdp
-      .send('Runtime.evaluate', {
-        expression: `(() => {
-          const c = (document.querySelector('meta[name="viewport" i]') || {}).content || '';
-          const m = /initial-scale\s*=\s*([\d.]+)/i.exec(c);
-          if (m) return Math.min(10, Math.max(0.1, parseFloat(m[1])));
-          if (/width\s*=\s*device-width/i.test(c)) return 1;
-          return ${vpW} / Math.max(${vpW}, document.documentElement.clientWidth || 980);
-        })()`,
-        returnByValue: true,
-      })
-      .catch(() => null);
-    const scale = Number(res?.result?.value);
-    if (!scale || !Number.isFinite(scale)) return;
-    await sleep(30);
-    await this.cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: scale }).catch(() => {});
-  }
-
-  /** 화면 분할(세그먼트)이 실제로 페이지에 반영됐는지 확인한다. 안 되면 신형 CDP 명령으로 한 번 더 시도한다. */
-  private async verifySegments(): Promise<void> {
-    const want = this.layout.displayFeature ? 2 : 1;
-    const count = async () =>
-      (
-        await this.cdp
-          .send('Runtime.evaluate', {
-            expression: 'window.viewport && window.viewport.segments ? window.viewport.segments.length : 1',
-            returnByValue: true,
-          })
-          .catch(() => null)
-      )?.result?.value as number | undefined;
-    if (!this.layout.displayFeature) {
-      await this.cdp.send('Emulation.clearDisplayFeaturesOverride' as never).catch(() => {});
-      this.support.segments = 'none';
-      return;
-    }
-    let n = await count();
-    if (n !== want) {
-      await this.cdp
-        .send('Emulation.setDisplayFeaturesOverride' as never, { features: [this.layout.displayFeature] } as never)
-        .catch(() => {});
-      await sleep(30);
-      n = await count();
-    }
-    this.support.segments = n === want ? 'ok' : 'unsupported';
-  }
-
-  private async applyUserAgent(): Promise<void> {
-    const version = this.browser.version();
-    const major = version.split('.')[0];
-    // 크롬의 축소된 UA처럼 주 버전만 남긴다(예: 141.0.0.0)
-    const ua = this.device.userAgent.replace(/\{chrome\}/g, `${major}.0.0.0`);
-    const key = `${ua}|${this.device.uaModel ?? ''}`;
-    if (key === this.uaKey) return;
-    this.uaKey = key;
-    const android = this.device.platform === 'android';
-    await this.cdp.send('Emulation.setUserAgentOverride', {
-      userAgent: ua,
-      acceptLanguage: 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-      platform: android ? 'Linux armv81' : 'iPhone',
-      ...(android
-        ? {
-            userAgentMetadata: {
-              brands: [
-                { brand: 'Chromium', version: major },
-                { brand: 'Google Chrome', version: major },
-                { brand: 'Not.A/Brand', version: '99' },
-              ],
-              fullVersion: version,
-              platform: 'Android',
-              platformVersion: this.device.platformVersion ?? '16.0.0',
-              architecture: '',
-              model: this.device.uaModel ?? '',
-              mobile: true,
-            },
-          }
-        : {}),
-    });
-  }
-
-  // ---------- 화면 스트리밍 ----------
-
-  private async ensureScreencast(): Promise<void> {
-    const vp = this.layout.viewport;
-    const key = `${vp.w}x${vp.h}`;
-    if (key === this.screencastKey) return;
-    if (this.screencastKey) await this.cdp.send('Page.stopScreencast').catch(() => {});
-    this.screencastKey = key;
-    await this.cdp.send('Page.startScreencast', {
-      format: 'jpeg',
-      quality: 75,
-      maxWidth: Math.round(vp.w * SCREENCAST_SCALE),
-      maxHeight: Math.round(vp.h * SCREENCAST_SCALE),
-      everyNthFrame: 1,
-    });
-  }
-
-  private onFrame(f: { data: string; sessionId: number; metadata: { deviceWidth: number; deviceHeight: number; scrollOffsetX: number; scrollOffsetY: number; pageScaleFactor: number } }): void {
-    const ack = () => {
-      if (!this.closed) void this.cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => {});
-    };
-    if (this.closed) return;
-    const m = f.metadata;
-    this.sink.frame(
-      {
-        vw: m.deviceWidth,
-        vh: m.deviceHeight,
-        scrollX: m.scrollOffsetX,
-        scrollY: m.scrollOffsetY,
-        pageScale: m.pageScaleFactor,
-        seq: ++this.seq,
-      },
-      Buffer.from(f.data, 'base64'),
-      ack,
-    );
-    // 화면이 바뀌었으니 조용해지면 다시 분석한다
-    if (!this.touching) this.scheduleAnalyze(900, 4000);
+    return result === 'reopened';
   }
 
   // ---------- 탐색 ----------
@@ -390,6 +226,7 @@ export class LiveSession {
 
   async history(dir: 'back' | 'forward' | 'reload'): Promise<void> {
     const opts = { waitUntil: 'domcontentloaded' as const, timeout: 30_000 };
+    this.driver.noteHistory(dir);
     try {
       if (dir === 'back') await this.page.goBack(opts);
       else if (dir === 'forward') await this.page.goForward(opts);
@@ -410,13 +247,10 @@ export class LiveSession {
 
   private async onDocumentReady(): Promise<void> {
     if (this.closed) return;
-    const res = await this.cdp
-      .send('Runtime.evaluate', {
-        expression: `(document.querySelector('meta[name="viewport" i]') || {}).content || ''`,
-        returnByValue: true,
-      })
-      .catch(() => null);
-    const fit = parseViewportFit(res?.result?.value as string | undefined);
+    const content = await this.driver
+      .evaluate<string>(`(document.querySelector('meta[name="viewport" i]') || {}).content || ''`)
+      .catch(() => undefined);
+    const fit = parseViewportFit(content);
     if (fit !== this.pageFit) {
       this.pageFit = fit;
       if (this.fit === 'page') {
@@ -428,24 +262,18 @@ export class LiveSession {
 
   // ---------- 입력 ----------
 
-  async touch(phase: 'start' | 'move' | 'end' | 'cancel', x: number, y: number): Promise<void> {
+  async touch(phase: TouchPhase, x: number, y: number): Promise<void> {
     if (this.capturing) return;
     this.lastActive = Date.now();
-    const type = { start: 'touchStart', move: 'touchMove', end: 'touchEnd', cancel: 'touchCancel' }[phase] as
-      | 'touchStart'
-      | 'touchMove'
-      | 'touchEnd'
-      | 'touchCancel';
     this.touching = phase === 'start' || phase === 'move';
-    const touchPoints = phase === 'end' || phase === 'cancel' ? [] : [{ x, y, id: 1, radiusX: 2, radiusY: 2, force: 1 }];
-    await this.cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+    await this.driver.touch(phase, x, y);
     if (!this.touching) this.scheduleAnalyze(900);
   }
 
   async wheel(x: number, y: number, dx: number, dy: number): Promise<void> {
     if (this.capturing) return;
     this.lastActive = Date.now();
-    await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: dx, deltaY: dy });
+    await this.driver.wheel(x, y, dx, dy);
   }
 
   async key(phase: 'down' | 'up', key: string): Promise<void> {
@@ -487,7 +315,7 @@ export class LiveSession {
     this.analyzing = this.analyze()
       .catch((err) => {
         const msg = String((err as Error).message ?? err);
-        if (!/context|Target closed|navigat/i.test(msg)) console.warn('[foldlab] 분석 실패:', msg);
+        if (!/context|Target closed|navigat|destroyed/i.test(msg)) console.warn('[foldlab] 분석 실패:', msg);
         return null;
       })
       .finally(() => {
@@ -502,56 +330,11 @@ export class LiveSession {
     return result;
   }
 
-  private async isolatedWorld(): Promise<number> {
-    if (this.worldId !== null) return this.worldId;
-    const tree = await this.cdp.send('Page.getFrameTree');
-    const { executionContextId } = await this.cdp.send('Page.createIsolatedWorld', {
-      frameId: tree.frameTree.frame.id,
-      worldName: 'foldlab',
-    });
-    const loaded = await this.cdp.send('Runtime.evaluate', {
-      expression: 'typeof __foldlab',
-      contextId: executionContextId,
-      returnByValue: true,
-    });
-    if (loaded.result.value !== 'object') {
-      const src = await getAnalyzerSource();
-      const r = await this.cdp.send('Runtime.evaluate', { expression: src, contextId: executionContextId });
-      if (r.exceptionDetails) throw new Error('분석기 주입 실패: ' + r.exceptionDetails.text);
-    }
-    this.worldId = executionContextId;
-    return executionContextId;
-  }
-
-  private async evalInWorld<T>(expression: string): Promise<T> {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const contextId = await this.isolatedWorld();
-      try {
-        const r = await this.cdp.send('Runtime.evaluate', { expression, contextId, returnByValue: true });
-        if (r.exceptionDetails) {
-          throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
-        }
-        return r.result.value as T;
-      } catch (err) {
-        if (attempt === 0 && /context|__foldlab is not defined/i.test(String((err as Error).message))) {
-          this.worldId = null;
-          continue;
-        }
-        throw err;
-      }
-    }
-    throw new Error('unreachable');
-  }
-
   async analyze(): Promise<Analysis | null> {
     if (!this.page.url().startsWith('http')) return null;
     const t0 = Date.now();
-    const usage = await this.cdp
-      .send('Runtime.evaluate', {
-        expression: 'globalThis.__foldlabApiUsage ? { ...globalThis.__foldlabApiUsage } : null',
-        returnByValue: true,
-      })
-      .then((r) => r.result.value as { segments: boolean; posture: boolean } | null)
+    const usage = await this.driver
+      .evaluate<{ segments: boolean; posture: boolean } | null>('globalThis.__foldlabApiUsage ? { ...globalThis.__foldlabApiUsage } : null')
       .catch(() => null);
     const L = this.layout;
     const input: AnalyzeInput = {
@@ -562,19 +345,20 @@ export class LiveSession {
       mode: L.mode,
       fit: L.fit,
       wide: L.wide,
-      twoSegments: !!L.displayFeature,
+      // WebKit(사파리)은 화면 분할 API가 없어 세그먼트를 흉내 내지 않는다
+      twoSegments: !!L.displayFeature && this.driver.engine === 'chromium',
       rawInsets: L.rawInsets,
       apiUsage: usage ?? undefined,
       chinRisk: L.mode === 'browser' && this.device.platform === 'android' && L.maxInsets.bottom > 0 && L.insets.bottom === 0,
     };
-    const out = await this.evalInWorld<AnalyzeOutput>(`__foldlab.analyze(${JSON.stringify(input)})`);
+    const out = await this.driver.evaluateTool<AnalyzeOutput>(`__foldlab.analyze(${JSON.stringify(input)})`);
     const counts: Record<Severity, number> = { high: 0, warn: 0, info: 0 };
     for (const i of out.issues) counts[i.severity]++;
     return this.withContinuity({ postureId: L.postureId, issues: out.issues, counts, env: out.env, at: Date.now(), ms: Date.now() - t0 });
   }
 
   async reveal(ref: number): Promise<void> {
-    await this.evalInWorld<boolean>(`__foldlab.reveal(${Number(ref)})`).catch(() => false);
+    await this.driver.evaluateTool<boolean>(`__foldlab.reveal(${Number(ref)})`).catch(() => false);
     this.scheduleAnalyze(450);
   }
 
@@ -585,15 +369,13 @@ export class LiveSession {
     const url = this.page.url();
     if (!url.startsWith('http') || this.loading) return null;
     const nonce = Math.random().toString(36).slice(2);
-    const ok = await this.cdp
-      .send('Runtime.evaluate', {
-        expression: `Object.defineProperty(window, '__foldlabSentinel', { value: '${nonce}', configurable: true, enumerable: false }) && true`,
-        returnByValue: true,
-      })
-      .then((r) => r.result.value === true)
+    const ok = await this.driver
+      .evaluate<boolean>(
+        `Object.defineProperty(window, '__foldlabSentinel', { value: '${nonce}', configurable: true, enumerable: false }) && true`,
+      )
       .catch(() => false);
     if (!ok) return null;
-    await this.evalInWorld<boolean>('__foldlab.snapshot()').catch(() => false);
+    await this.driver.evaluateTool<boolean>('__foldlab.snapshot()').catch(() => false);
     return { nonce, url };
   }
 
@@ -613,17 +395,14 @@ export class LiveSession {
       fixed: false,
       scroll: { x: 0, y: 0 },
     });
-    const sentinel = await this.cdp
-      .send('Runtime.evaluate', { expression: 'window.__foldlabSentinel', returnByValue: true })
-      .then((r) => r.result.value as string | undefined)
-      .catch(() => undefined);
+    const sentinel = await this.driver.evaluate<string | undefined>('window.__foldlabSentinel').catch(() => undefined);
     const url = this.page.url();
     if (sentinel !== t.nonce || url !== t.url) {
       const detail =
         url !== t.url ? `자세를 바꾸자 다른 주소(${url})로 이동했습니다.` : '자세를 바꾸자 페이지를 새로 불러와 상태가 모두 초기화됐습니다.';
       return [mk({ severity: 'high', detail }, 0)];
     }
-    const findings = await this.evalInWorld<ContinuityFinding[] | null>('__foldlab.compareSnapshot()').catch(() => null);
+    const findings = await this.driver.evaluateTool<ContinuityFinding[] | null>('__foldlab.compareSnapshot()').catch(() => null);
     if (!findings) return [mk({ severity: 'high', detail: '자세를 바꾸자 문서가 새로 만들어졌습니다.' }, 0)];
     return findings.map(mk);
   }
@@ -658,13 +437,14 @@ export class LiveSession {
         const from = this.postureId;
         const transition = from !== ids[i] ? await this.beginTransition() : null;
         this.postureId = ids[i];
-        await this.applyEmulation();
+        const reopened = await this.applyEmulation();
         await this.pushState();
         await this.settle();
-        this.continuity = transition ? { postureId: ids[i], issues: await this.endTransition(transition, from, ids[i]) } : null;
+        this.continuity =
+          transition && !reopened ? { postureId: ids[i], issues: await this.endTransition(transition, from, ids[i]) } : null;
         const analysis = await this.analyze();
-        const image = await this.screenshot();
-        if (analysis) items.push({ postureId: ids[i], layout: this.layout, image, imageScale: CAPTURE_SCALE, analysis });
+        const shot = await this.driver.screenshot(this.layout);
+        if (analysis) items.push({ postureId: ids[i], layout: this.layout, image: shot.image, imageScale: shot.scale, analysis });
         onProgress(i + 1, ids.length, ids[i]);
       }
     } finally {
@@ -687,50 +467,32 @@ export class LiveSession {
 
   /** 자세를 바꾼 뒤 레이아웃·이미지가 자리 잡을 때까지 기다린다 */
   private async settle(): Promise<void> {
-    await this.cdp
-      .send('Runtime.evaluate', {
-        expression: 'new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))',
-        awaitPromise: true,
-      })
+    await this.driver
+      .evaluate('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))')
       .catch(() => {});
     await sleep(350);
-  }
-
-  private async screenshot(): Promise<string> {
-    const m = await this.cdp.send('Page.getLayoutMetrics');
-    const v = m.cssVisualViewport;
-    const shot = await this.cdp.send('Page.captureScreenshot', {
-      format: 'png',
-      clip: {
-        x: v.pageX,
-        y: v.pageY,
-        width: v.clientWidth,
-        height: v.clientHeight,
-        scale: (CAPTURE_SCALE * (v.scale || 1)) / this.layout.dpr,
-      },
-      captureBeyondViewport: false,
-    });
-    return `data:image/png;base64,${shot.data}`;
   }
 
   // ---------- 상태 ----------
 
   async pushState(): Promise<void> {
-    if (this.closed) return;
-    const hist = await this.cdp.send('Page.getNavigationHistory').catch(() => null);
+    if (this.closed || !this.layout) return;
+    const nav = await this.driver.navigationState().catch(() => ({ canGoBack: false, canGoForward: false }));
     const state: SessionState = {
-      url: this.page.url(),
-      title: await this.page.title().catch(() => ''),
+      engine: this.driver.engine,
+      engineVersion: this.driver.version,
+      url: this.page?.url() ?? 'about:blank',
+      title: (await this.page?.title().catch(() => '')) ?? '',
       loading: this.loading,
-      canGoBack: !!hist && hist.currentIndex > 0 && hist.entries[hist.currentIndex - 1]?.url !== 'about:blank',
-      canGoForward: !!hist && hist.currentIndex < hist.entries.length - 1,
+      canGoBack: nav.canGoBack,
+      canGoForward: nav.canGoForward,
       deviceId: this.device.id,
       postureId: this.postureId,
       mode: this.mode,
       fit: this.fit,
       effectiveFit: this.effectiveFit(),
       layout: this.layout,
-      support: { ...this.support },
+      support: { ...this.driver.support },
     };
     this.sink.json({ t: 'state', state });
   }
@@ -739,6 +501,6 @@ export class LiveSession {
     if (this.closed) return;
     this.closed = true;
     if (this.analyzeTimer) clearTimeout(this.analyzeTimer);
-    await this.context?.close().catch(() => {});
+    await this.driver.close();
   }
 }

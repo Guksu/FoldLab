@@ -1,5 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import type { BrowserContext, Route } from 'playwright';
+import { config } from './config';
 
 /** 사용자가 입력한 주소를 http(s) URL로 정규화한다. 스킴이 없으면 붙여 준다. */
 export function normalizeUrl(input: string): URL {
@@ -51,4 +53,23 @@ export async function resolvesToPrivate(hostname: string): Promise<boolean> {
   }
   cache.set(host, { at: Date.now(), blocked });
   return blocked;
+}
+
+/** 사설망을 막는 설정이면 그쪽으로 가는 요청을 끊는다. 끊었으면 true */
+export async function blockIfPrivate(route: Route): Promise<boolean> {
+  if (config.allowPrivateNetwork) return false;
+  const url = new URL(route.request().url());
+  if ((url.protocol === 'http:' || url.protocol === 'https:') && (await resolvesToPrivate(url.hostname))) {
+    await route.abort('blockedbyclient').catch(() => {});
+    return true;
+  }
+  return false;
+}
+
+/** 페이지 안 하위 요청(이미지·fetch 등)까지 사설망으로 가지 못하게 막는다 */
+export async function guardRoute(context: BrowserContext): Promise<void> {
+  if (config.allowPrivateNetwork) return;
+  await context.route('**/*', async (route) => {
+    if (!(await blockIfPrivate(route))) await route.continue().catch(() => {});
+  });
 }
