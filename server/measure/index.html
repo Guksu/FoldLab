@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>FoldLab 실측</title>
+<style>
+  :root {
+    --text: #101828; --text-2: #475467; --text-3: #667085; --border: #e4e7ec; --surface: #fff; --bg: #f5f6f8;
+    --ok: #12b76a; --warn: #d97706; --high: #e5484d;
+    /* 측정용: env()를 문자열로 읽는다(지원하지 않거나 값이 없으면 none) */
+    --sai-top: env(safe-area-inset-top, none); --sai-right: env(safe-area-inset-right, none);
+    --sai-bottom: env(safe-area-inset-bottom, none); --sai-left: env(safe-area-inset-left, none);
+    --sam-top: env(safe-area-max-inset-top, none); --sam-right: env(safe-area-max-inset-right, none);
+    --sam-bottom: env(safe-area-max-inset-bottom, none); --sam-left: env(safe-area-max-inset-left, none);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', system-ui, sans-serif;
+    color: var(--text); background: var(--bg); -webkit-text-size-adjust: 100%; word-break: keep-all; overflow: hidden;
+  }
+  /* 안전 영역 밖을 빗금으로 보여 준다 */
+  .safe-frame {
+    position: fixed; inset: 0; pointer-events: none; z-index: 2;
+    border-style: solid; border-color: rgba(217, 119, 6, 0.28);
+    border-width: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  }
+  .seg { position: fixed; z-index: 1; pointer-events: none; border: 2px dashed rgba(59, 130, 246, 0.7); }
+  main {
+    position: fixed; inset: 0; overflow: auto; -webkit-overflow-scrolling: touch;
+    padding: calc(env(safe-area-inset-top, 0px) + 16px) calc(env(safe-area-inset-right, 0px) + 16px)
+      calc(env(safe-area-inset-bottom, 0px) + 24px) calc(env(safe-area-inset-left, 0px) + 16px);
+  }
+  .wrap { max-width: 560px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: -0.02em; }
+  .sub { margin: 0 0 14px; color: var(--text-3); font-size: 13px; }
+  .status { display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-bottom: 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); font-size: 14px; font-weight: 600; }
+  .status i { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); flex: none; }
+  .status.ok i { background: var(--ok); } .status.err i { background: var(--high); } .status.wait i { background: var(--warn); }
+  dl { margin: 0; padding: 4px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: 0; }
+  dt { color: var(--text-3); font-size: 13px; flex: none; }
+  dd { margin: 0; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .note { margin: 12px 2px 0; color: var(--text-3); font-size: 12.5px; line-height: 1.6; }
+  .note b { color: var(--text-2); }
+  button {
+    margin-top: 14px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: var(--text); color: #fff;
+    font: inherit; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+<div class="safe-frame" aria-hidden="true"></div>
+<div id="segs" aria-hidden="true"></div>
+<main>
+  <div class="wrap">
+    <h1>FoldLab 실측</h1>
+    <p class="sub">이 기기의 화면 값을 재서 PC의 FoldLab으로 보냅니다. 빗금은 안전 영역 밖, 파란 점선은 화면 세그먼트입니다.</p>
+    <div id="status" class="status wait"><i></i><span>재는 중…</span></div>
+    <dl id="values"></dl>
+    <p class="note">접거나 펴거나 돌리면 자동으로 다시 재서 보냅니다. 자세마다 한 번씩 바꿔 보세요.</p>
+    <p class="note" id="secure-note" hidden>
+      <b>보안 연결이 아니라서</b> 접힘 상태(Device Posture)와 기기 모델명은 잴 수 없습니다.
+      USB로 연결해 PC 크롬의 <b>chrome://inspect → Port forwarding</b>에 4280을 추가하고, 폰에서 <b>localhost:4280</b> 주소로 열면 모두 잴 수 있어요.
+    </p>
+    <button type="button" id="resend">다시 재서 보내기</button>
+  </div>
+</main>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const token = params.get('t') || '';
+  const statusEl = document.getElementById('status');
+  const valuesEl = document.getElementById('values');
+  const segsEl = document.getElementById('segs');
+  let sent = 0;
+  let lastKey = '';
+
+  const r2 = (v) => Math.round(v * 100) / 100;
+  const parsePx = (v) => {
+    const s = String(v || '').trim();
+    if (!s || s === 'none' || s.includes('env(')) return null;
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? r2(n) : null;
+  };
+
+  // env() 값은 :root에 둔 사용자 정의 속성으로 읽고, 브라우저가 치환하지 않으면 padding으로 다시 잰다
+  function readInsets(prefix, varPrefix) {
+    const cs = getComputedStyle(document.documentElement);
+    const out = {};
+    let viaVar = true;
+    for (const edge of ['top', 'right', 'bottom', 'left']) {
+      const raw = cs.getPropertyValue(`--${varPrefix}-${edge}`);
+      if (raw.trim() === 'none') return null;
+      const v = parsePx(raw);
+      if (v === null) { viaVar = false; break; }
+      out[edge] = v;
+    }
+    if (viaVar) return out;
+    const el = document.createElement('div');
+    el.style.cssText = `position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;padding:env(${prefix}-top,0px) env(${prefix}-right,0px) env(${prefix}-bottom,0px) env(${prefix}-left,0px)`;
+    document.body.appendChild(el);
+    const p = getComputedStyle(el);
+    const res = { top: r2(parseFloat(p.paddingTop)), right: r2(parseFloat(p.paddingRight)), bottom: r2(parseFloat(p.paddingBottom)), left: r2(parseFloat(p.paddingLeft)) };
+    el.remove();
+    return res;
+  }
+
+  function unit(u) {
+    if (!(window.CSS && CSS.supports && CSS.supports('height', `100${u}`))) return null;
+    const el = document.createElement('div');
+    el.style.cssText = `position:fixed;left:0;top:0;width:1px;height:100${u};visibility:hidden`;
+    document.body.appendChild(el);
+    const h = el.getBoundingClientRect().height;
+    el.remove();
+    return r2(h);
+  }
+
+  // Viewport Segments API를 우선 쓰고, 없으면 CSS env(viewport-segment-*)로 잰다
+  function readSegments() {
+    const api = window.viewport && window.viewport.segments;
+    if (api && api.length > 1) return Array.from(api).map((s) => ({ x: r2(s.x), y: r2(s.y), w: r2(s.width), h: r2(s.height) }));
+    const probe = (i, j) => {
+      const el = document.createElement('div');
+      el.style.cssText = `position:fixed;visibility:hidden;--l:env(viewport-segment-left ${i} ${j}, none);--t:env(viewport-segment-top ${i} ${j}, none);--w:env(viewport-segment-width ${i} ${j}, none);--h:env(viewport-segment-height ${i} ${j}, none)`;
+      document.body.appendChild(el);
+      const cs = getComputedStyle(el);
+      const v = ['--l', '--t', '--w', '--h'].map((k) => parsePx(cs.getPropertyValue(k)));
+      el.remove();
+      return v.every((n) => n !== null) ? { x: v[0], y: v[1], w: v[2], h: v[3] } : null;
+    };
+    const side = [probe(0, 0), probe(1, 0)];
+    if (side[0] && side[1]) return side;
+    const stack = [probe(0, 0), probe(0, 1)];
+    if (stack[0] && stack[1]) return stack;
+    return [];
+  }
+
+  // CSS 미디어 쿼리는 보안 연결이 아니어도 쓸 수 있어 먼저 본다
+  function readPosture() {
+    if (matchMedia('(device-posture: folded)').matches) return 'folded';
+    const dp = navigator.devicePosture;
+    if (dp && dp.type) return dp.type;
+    if (matchMedia('(device-posture: continuous)').matches) return 'continuous';
+    return null;
+  }
+
+  function displayMode() {
+    for (const m of ['fullscreen', 'standalone', 'minimal-ui']) if (matchMedia(`(display-mode: ${m})`).matches) return m;
+    return 'browser';
+  }
+
+  let uaHigh = null;
+  async function loadUaData() {
+    const d = navigator.userAgentData;
+    if (!d) return;
+    try {
+      uaHigh = await d.getHighEntropyValues(['model', 'platformVersion']);
+      uaHigh.mobile = d.mobile;
+      uaHigh.platform = d.platform;
+    } catch (_) {
+      uaHigh = { mobile: d.mobile, platform: d.platform };
+    }
+  }
+
+  function measure() {
+    const vv = window.visualViewport;
+    const o = screen.orientation;
+    return {
+      id: Math.random().toString(36).slice(2, 10),
+      at: Date.now(),
+      secure: window.isSecureContext === true,
+      displayMode: displayMode(),
+      touchPoints: navigator.maxTouchPoints || 0,
+      ua: {
+        string: navigator.userAgent,
+        mobile: uaHigh && typeof uaHigh.mobile === 'boolean' ? uaHigh.mobile : null,
+        platform: (uaHigh && uaHigh.platform) || null,
+        platformVersion: (uaHigh && uaHigh.platformVersion) || null,
+        model: (uaHigh && uaHigh.model) || null,
+      },
+      // 2.625 같은 값이 흔하므로 소수 셋째 자리까지 둔다
+      dpr: Math.round((window.devicePixelRatio || 1) * 1000) / 1000,
+      screen: {
+        width: screen.width, height: screen.height, availWidth: screen.availWidth, availHeight: screen.availHeight,
+        orientation: o ? o.type : null, angle: o ? o.angle : (typeof window.orientation === 'number' ? (window.orientation + 360) % 360 : null),
+      },
+      viewport: {
+        width: window.innerWidth, height: window.innerHeight,
+        clientWidth: document.documentElement.clientWidth, clientHeight: document.documentElement.clientHeight,
+      },
+      visual: vv ? { width: r2(vv.width), height: r2(vv.height), scale: r2(vv.scale), offsetTop: r2(vv.offsetTop), offsetLeft: r2(vv.offsetLeft) } : null,
+      units: { svh: unit('svh'), lvh: unit('lvh'), dvh: unit('dvh') },
+      safeArea: readInsets('safe-area-inset', 'sai') || { top: 0, right: 0, bottom: 0, left: 0 },
+      safeAreaMax: readInsets('safe-area-max-inset', 'sam'),
+      segments: readSegments(),
+      posture: readPosture(),
+    };
+  }
+
+  const ins = (i) => (i ? `${i.top} · ${i.right} · ${i.bottom} · ${i.left}` : '—');
+  function render(m) {
+    const rows = [
+      ['뷰포트', `${m.viewport.width} × ${m.viewport.height}`],
+      ['화면', `${m.screen.width} × ${m.screen.height}${m.screen.orientation ? ` (${m.screen.orientation.startsWith('landscape') ? '가로' : '세로'})` : ''}`],
+      ['DPR', String(m.dpr)],
+      ['안전 영역 (위·오른쪽·아래·왼쪽)', ins(m.safeArea)],
+      ['최대 안전 영역', ins(m.safeAreaMax)],
+      ['세그먼트', m.segments.length > 1 ? m.segments.map((s) => `${s.w}×${s.h}`).join(' + ') : '1개'],
+      ['자세', m.posture || '잴 수 없음'],
+      ['svh · lvh · dvh', [m.units.svh, m.units.lvh, m.units.dvh].map((v) => (v === null ? '—' : v)).join(' · ')],
+      ['표시 방식', m.displayMode],
+      ['기기 모델', m.ua.model || '—'],
+      ['브라우저', m.ua.string],
+    ];
+    valuesEl.replaceChildren(
+      ...rows.map(([k, v]) => {
+        const row = document.createElement('div');
+        row.className = 'row';
+        const dt = document.createElement('dt');
+        dt.textContent = k;
+        const dd = document.createElement('dd');
+        dd.textContent = v;
+        row.append(dt, dd);
+        return row;
+      }),
+    );
+    segsEl.replaceChildren(
+      ...(m.segments.length > 1 ? m.segments : []).map((s) => {
+        const el = document.createElement('div');
+        el.className = 'seg';
+        el.style.cssText = `left:${s.x + 3}px;top:${s.y + 3}px;width:${Math.max(0, s.w - 6)}px;height:${Math.max(0, s.h - 6)}px`;
+        return el;
+      }),
+    );
+    document.getElementById('secure-note').hidden = m.secure;
+  }
+
+  function setStatus(kind, text) {
+    statusEl.className = `status ${kind}`;
+    statusEl.lastElementChild.textContent = text;
+  }
+
+  async function send(m) {
+    if (!token) {
+      setStatus('err', 'FoldLab 화면의 QR이나 주소로 열어야 값을 보낼 수 있어요.');
+      return;
+    }
+    try {
+      const res = await fetch(`/measure/report?t=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(m),
+      });
+      if (!res.ok) throw new Error(res.status === 403 ? '주소가 만료됐어요. FoldLab에서 QR을 다시 열어 주세요.' : `응답 ${res.status}`);
+      sent += 1;
+      setStatus('ok', `FoldLab으로 보냄 · ${sent}개`);
+    } catch (err) {
+      setStatus('err', `보내지 못했어요: ${err.message}`);
+    }
+  }
+
+  // 값이 바뀌었을 때만 보낸다(주소창이 접히는 정도의 작은 변화는 키에 넣지 않는다)
+  function keyOf(m) {
+    return JSON.stringify([m.viewport.width, m.screen.width, m.screen.height, m.screen.orientation, m.dpr, m.safeArea, m.segments, m.posture]);
+  }
+
+  function run(force) {
+    const m = measure();
+    window.__foldlabMeasure = m;
+    render(m);
+    const key = keyOf(m);
+    if (!force && key === lastKey) return;
+    lastKey = key;
+    void send(m);
+  }
+
+  let timer = 0;
+  const schedule = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => run(false), 450);
+  };
+  addEventListener('resize', schedule);
+  addEventListener('orientationchange', schedule);
+  if (screen.orientation) screen.orientation.addEventListener('change', schedule);
+  if (navigator.devicePosture) navigator.devicePosture.addEventListener('change', schedule);
+  matchMedia('(device-posture: folded)').addEventListener?.('change', schedule);
+  document.getElementById('resend').addEventListener('click', () => run(true));
+
+  window.__foldlabMeasureNow = () => measure();
+  loadUaData().finally(() => requestAnimationFrame(() => run(true)));
+})();
+</script>
+</body>
+</html>

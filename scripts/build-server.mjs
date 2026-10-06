@@ -28,4 +28,5 @@ const inpage = await esbuild.build({
 await writeFile(new URL('inpage.js', out), inpage.outputFiles[0].text);
 await cp('inpage/hooks.js', new URL('hooks.js', out));
 await cp('server/demo', new URL('demo', out), { recursive: true });
+await cp('server/measure', new URL('measure', out), { recursive: true });
 console.log('built dist/server');
