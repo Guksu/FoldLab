@@ -8,6 +8,8 @@ import { DeviceBase, DeviceDefs, DeviceTop, frameBox } from './DeviceArt';
 import { Button, IconButton, Select } from './ui';
 
 interface Props {
+  /** 실측값으로 미리 채울 때 */
+  initial?: CustomParams;
   onSave: (device: DeviceSpec) => void;
   onClose: () => void;
 }
@@ -40,8 +42,8 @@ function Preview({ device, postureId, caption }: { device: DeviceSpec; postureId
 }
 
 /** 카탈로그에 없는 기기(사내 시제품, 루머 기기 등)를 값으로 정의한다 */
-export function CustomDeviceDialog({ onSave, onClose }: Props) {
-  const [p, setP] = useState<CustomParams>(CUSTOM_DEFAULTS);
+export function CustomDeviceDialog({ initial, onSave, onClose }: Props) {
+  const [p, setP] = useState<CustomParams>(initial ?? CUSTOM_DEFAULTS);
   const [json, setJson] = useState('');
   const [error, setError] = useState<string | null>(null);
   const device = useMemo(() => buildCustomDevice(p, 'custom-preview'), [p]);

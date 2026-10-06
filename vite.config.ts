@@ -12,6 +12,7 @@ export default defineConfig({
     proxy: {
       '/api': target,
       '/demo': target,
+      '/measure': target,
       '/ws': { target, ws: true },
     },
   },

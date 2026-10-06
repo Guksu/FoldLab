@@ -1,3 +1,4 @@
+import type { MeasureSnapshot, MeasureUrl } from './measure';
 import type { Analysis, DeviceSpec, DisplayMode, FitPolicy, Layout, ViewportFit } from './types';
 
 /** 브라우저(UI) → 서버 */
@@ -19,7 +20,9 @@ export type ClientMessage =
   | { t: 'text'; text: string }
   | { t: 'analyze' }
   | { t: 'reveal'; ref: number }
-  | { t: 'capture'; postureIds: string[] };
+  | { t: 'capture'; postureIds: string[] }
+  | { t: 'measure-start'; lan: boolean }
+  | { t: 'measure-stop' };
 
 export interface EmulationSupport {
   segments: 'ok' | 'unsupported' | 'none';
@@ -68,6 +71,8 @@ export type ServerMessage =
   | { t: 'capture-progress'; done: number; total: number; postureId: string }
   | { t: 'capture'; result: CaptureResult }
   | { t: 'dialog'; kind: string; message: string }
+  | { t: 'measure-ready'; token: string; urls: MeasureUrl[]; lanError?: string }
+  | { t: 'measure-snapshot'; snapshot: MeasureSnapshot }
   | { t: 'error'; message: string };
 
 export interface FrameHeader {

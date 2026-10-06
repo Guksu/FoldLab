@@ -102,6 +102,12 @@ export class LiveSession {
     await this.cdp.send('Page.enable');
     const hooks = await getHooksSource();
     if (hooks) await this.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: hooks });
+    // 새 문서의 navigator.devicePosture는 처음 만들어질 때 재정의 값을 무시하므로 문서 시작 때 미리 만들어 둔다.
+    // 페이지의 API 사용 감지(hooks)에 걸리지 않게 격리된 월드에서 건드린다.
+    await this.cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: 'void (navigator.devicePosture && navigator.devicePosture.type);',
+      worldName: 'foldlab-posture',
+    } as never);
     await this.cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
 
     this.cdp.on('Page.screencastFrame', (f) => this.onFrame(f));
@@ -109,6 +115,7 @@ export class LiveSession {
       if (frame !== this.page.mainFrame()) return;
       this.worldId = null;
       if (!this.capturing) this.continuity = null;
+      void this.reapplyPosture();
       void this.pushState();
     });
     this.page.on('domcontentloaded', () => void this.onDocumentReady());
@@ -158,6 +165,17 @@ export class LiveSession {
 
   private effectiveFit(): ViewportFit {
     return resolveFit(this.device, this.mode, this.fit, this.pageFit);
+  }
+
+  /**
+   * 크롬은 새 문서의 navigator.devicePosture에 재정의 값을 넘겨주지 않는다(CSS device-posture는 그대로).
+   * 같은 값을 다시 걸면 무시되므로 지웠다가 다시 건다. 문서 시작 때 객체를 만들어 두었으니 페이지 스크립트보다 먼저 반영된다.
+   */
+  private async reapplyPosture(): Promise<void> {
+    if (this.closed || !this.layout || this.support.posture !== 'ok') return;
+    const type = this.layout.devicePosture;
+    await this.cdp.send('Emulation.clearDevicePostureOverride' as never).catch(() => {});
+    await this.cdp.send('Emulation.setDevicePostureOverride' as never, { posture: { type } } as never).catch(() => {});
   }
 
   private async applyEmulation(): Promise<void> {

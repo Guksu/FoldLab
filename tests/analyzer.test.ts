@@ -6,7 +6,7 @@ import { closeBrowser, getBrowser } from '../server/browser';
 import { LiveSession } from '../server/session';
 import { getDevice } from '../shared/devices';
 import type { CaptureResult } from '../shared/protocol';
-import type { RuleId } from '../shared/types';
+import type { Analysis, RuleId } from '../shared/types';
 
 /** 실제 크로미움으로 데모 페이지를 열어 자세별 규칙이 걸리는지 확인한다 */
 
@@ -128,5 +128,26 @@ describe('고친 데모 페이지', () => {
     const env = r.items.find((i) => i.postureId === 'unfolded')!.analysis.env;
     expect(env.usesSafeArea).toBe(true);
     expect(env.usesSegments).toBe(true);
+  });
+});
+
+describe('자세 에뮬레이션', () => {
+  it('페이지를 연 뒤에도 navigator.devicePosture가 반 접힘을 유지한다', async () => {
+    // 크롬은 문서가 바뀌면 자세 재정의를 풀기 때문에 세션이 새 문서마다 다시 걸어야 한다
+    const browser = await getBrowser();
+    const analyses: Analysis[] = [];
+    const session = new LiveSession(
+      browser,
+      { json: (m) => void (m.t === 'analysis' && analyses.push(m.analysis)), frame: (_h, _j, done) => done() },
+      { device: getDevice('galaxy-z-fold7')!, postureId: 'book', mode: 'app', fit: 'page' },
+    );
+    try {
+      await session.start();
+      await session.navigate(base);
+      await expect.poll(() => analyses.length, { timeout: 20000 }).toBeGreaterThan(0);
+      expect(analyses[analyses.length - 1].env.posture).toBe('folded');
+    } finally {
+      await session.close();
+    }
   });
 });

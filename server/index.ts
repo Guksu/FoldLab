@@ -7,6 +7,7 @@ import { encodeFrame, type ClientMessage, type ServerMessage } from '../shared/p
 import { validateDevice } from '../shared/validate';
 import { closeBrowser, getBrowser } from './browser';
 import { config } from './config';
+import { MeasureHub } from './measure';
 import { LiveSession, type SessionSink } from './session';
 
 const VERSION = '0.1.0';
@@ -31,9 +32,13 @@ app.get('/api/health', async (_req, res) => {
 
 app.use('/demo', express.static(demoDir, { extensions: ['html'] }));
 
+// 실기기 측정 페이지. 같은 와이파이의 폰은 UI가 요청할 때 여는 별도 포트로 접속한다.
+const measure = new MeasureHub();
+app.use(measure.router({ requireTokenForPage: false }));
+
 if (hasWebBuild) {
   app.use(express.static(webDir, { index: 'index.html', maxAge: '1h' }));
-  app.get(/^\/(?!api\/|ws$|demo\/).*/, (_req, res) => res.sendFile(`${webDir}/index.html`));
+  app.get(/^\/(?!api\/|ws$|demo\/|measure).*/, (_req, res) => res.sendFile(`${webDir}/index.html`));
 }
 
 const server = createServer(app);
@@ -75,6 +80,7 @@ wss.on('connection', (ws: WebSocket, req) => {
   };
 
   let session: LiveSession | null = null;
+  let stopMeasure: (() => void) | null = null;
   let queue: Promise<void> = Promise.resolve();
   const fail = (err: unknown) => sink.json({ t: 'error', message: String((err as Error)?.message ?? err) });
 
@@ -99,6 +105,17 @@ wss.on('connection', (ws: WebSocket, req) => {
         await session.configure({ device: msg.device, postureId: msg.postureId, mode: msg.mode, fit: msg.fit });
       }
       await session.navigate(msg.url);
+      return;
+    }
+    if (msg.t === 'measure-start') {
+      stopMeasure?.();
+      stopMeasure = measure.subscribe((snapshot) => sink.json({ t: 'measure-snapshot', snapshot }));
+      sink.json({ t: 'measure-ready', ...(await measure.start(msg.lan)) });
+      return;
+    }
+    if (msg.t === 'measure-stop') {
+      stopMeasure?.();
+      stopMeasure = null;
       return;
     }
     if (!session) throw new Error('먼저 주소를 열어 주세요.');
@@ -155,6 +172,8 @@ wss.on('connection', (ws: WebSocket, req) => {
   });
 
   ws.on('close', () => {
+    stopMeasure?.();
+    stopMeasure = null;
     const s = session;
     session = null;
     if (s) {
@@ -187,7 +206,7 @@ server.listen(config.port, config.host, () => {
 async function shutdown() {
   clearInterval(idleTimer);
   await Promise.all([...sessions].map((s) => s.close()));
-  await closeBrowser();
+  await Promise.all([closeBrowser(), measure.closeLan()]);
   server.close();
   process.exit(0);
 }

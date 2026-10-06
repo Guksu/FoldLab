@@ -14,6 +14,7 @@ import {
   Play,
   Plus,
   RotateCw,
+  Ruler,
   ShieldCheck,
   Smartphone,
   Trash2,
@@ -21,12 +22,15 @@ import {
 } from 'lucide-react';
 import { DEFAULT_DEVICE_ID, DEVICES } from '../../shared/devices';
 import { computeLayout, resolveFit } from '../../shared/geometry';
+import type { CustomParams } from '../../shared/custom';
+import type { MeasureSnapshot, MeasureUrl } from '../../shared/measure';
 import type { CaptureResult, SessionState } from '../../shared/protocol';
 import type { Analysis, DeviceKind, DeviceSpec, DisplayMode, FitPolicy } from '../../shared/types';
 import { CustomDeviceDialog } from './components/CustomDeviceDialog';
 import type { OverlayToggles } from './components/DeviceArt';
 import { IssuePanel } from './components/IssuePanel';
 import { LiveDevice } from './components/LiveDevice';
+import { MeasureDialog } from './components/MeasureDialog';
 import { SheetPage } from './components/SheetPage';
 import { Button, IconButton, Logo, Segmented, Select, Switch, ToggleChip } from './components/ui';
 import { MODE_LABEL, postureLabel } from './lib/format';
@@ -140,6 +144,10 @@ export function App() {
   );
   const device = allDevices.find((d) => d.id === deviceId) ?? DEVICES[0];
   const [customOpen, setCustomOpen] = useState(false);
+  const [customInitial, setCustomInitial] = useState<CustomParams | undefined>(undefined);
+  const [measureOpen, setMeasureOpen] = useState(false);
+  const [measureReady, setMeasureReady] = useState<{ urls: MeasureUrl[]; lanError?: string } | null>(null);
+  const [snapshots, setSnapshots] = useState<MeasureSnapshot[]>([]);
   const [postureId, setPostureId] = useState(params.get('posture') ?? saved.postureId ?? 'unfolded');
   const [mode, setMode] = useState<DisplayMode>((params.get('mode') as DisplayMode) ?? saved.mode ?? 'app');
   const [fit, setFit] = useState<FitPolicy>(saved.fit ?? 'page');
@@ -183,6 +191,7 @@ export function App() {
         setSession(null);
         setAnalysis(null);
         setProgress(null);
+        setMeasureReady(null);
       }
     });
     const offMsg = client.on('message', (m) => {
@@ -205,6 +214,12 @@ export function App() {
           break;
         case 'dialog':
           showToast(`페이지 ${m.kind}: ${m.message}`, 'info');
+          break;
+        case 'measure-ready':
+          setMeasureReady({ urls: m.urls, lanError: m.lanError });
+          break;
+        case 'measure-snapshot':
+          setSnapshots((list) => [m.snapshot, ...list.filter((x) => x.id !== m.snapshot.id)].slice(0, 40));
           break;
         case 'error':
           setProgress(null);
@@ -347,6 +362,25 @@ export function App() {
     showToast(`'${device.name}' 기기를 삭제했습니다.`);
   };
 
+  const openMeasure = () => {
+    setMeasureOpen(true);
+    client.send({ t: 'measure-start', lan: true });
+  };
+
+  const closeMeasure = () => {
+    setMeasureOpen(false);
+    client.send({ t: 'measure-stop' });
+  };
+
+  const copyText = async (text: string, what: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(`${what}를 복사했습니다.`);
+    } catch {
+      showToast('클립보드에 접근할 수 없습니다.', 'error');
+    }
+  };
+
   const copyDeviceJson = async () => {
     try {
       await navigator.clipboard.writeText(JSON.stringify(device, null, 2));
@@ -466,7 +500,18 @@ export function App() {
           </Select>
         </label>
         <div className="spacer" />
-        <Button variant="ghost" size="sm" icon={Plus} onClick={() => setCustomOpen(true)}>
+        <Button variant="ghost" size="sm" icon={Ruler} onClick={openMeasure}>
+          실기기로 재기
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={Plus}
+          onClick={() => {
+            setCustomInitial(undefined);
+            setCustomOpen(true);
+          }}
+        >
           기기 만들기
         </Button>
       </div>
@@ -576,7 +621,25 @@ export function App() {
           onGoLive={() => setTab('live')}
         />
       )}
-      {customOpen && <CustomDeviceDialog onSave={addCustomDevice} onClose={() => setCustomOpen(false)} />}
+      {customOpen && <CustomDeviceDialog initial={customInitial} onSave={addCustomDevice} onClose={() => setCustomOpen(false)} />}
+      {measureOpen && (
+        <MeasureDialog
+          conn={conn}
+          ready={measureReady}
+          snapshots={snapshots}
+          device={device}
+          onRetry={() => client.send({ t: 'measure-start', lan: true })}
+          onRemove={(id) => setSnapshots((list) => list.filter((x) => x.id !== id))}
+          onClear={() => setSnapshots([])}
+          onCopy={(text, what) => void copyText(text, what)}
+          onPrefill={(params) => {
+            closeMeasure();
+            setCustomInitial(params);
+            setCustomOpen(true);
+          }}
+          onClose={closeMeasure}
+        />
+      )}
       {toast && <ToastView toast={toast} onClose={() => setToast(null)} />}
     </div>
   );
