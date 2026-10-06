@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { closeBrowser, getBrowser } from '../server/browser';
+import { closeBrowser } from '../server/browser';
 import { LiveSession } from '../server/session';
 import { getDevice } from '../shared/devices';
 import type { CaptureResult } from '../shared/protocol';
@@ -30,9 +30,7 @@ afterAll(async () => {
 
 async function captureDemo(query: string, deviceId: string, postureIds: string[], mode: 'app' | 'browser' = 'app'): Promise<CaptureResult> {
   const device = getDevice(deviceId)!;
-  const browser = await getBrowser();
   const session = new LiveSession(
-    browser,
     { json: () => {}, frame: (_h, _j, done) => done() },
     { device, postureId: postureIds[0], mode, fit: 'page' },
   );
@@ -97,8 +95,7 @@ describe('문제 있는 데모 페이지', () => {
 describe('라이브 조작', () => {
   it('터치로 버튼을 누르면 열린 대화상자가 접는 선에 걸린 것을 찾는다', async () => {
     const device = getDevice('galaxy-z-fold7')!;
-    const browser = await getBrowser();
-    const session = new LiveSession(browser, { json: () => {}, frame: (_h, _j, done) => done() }, { device, postureId: 'book', mode: 'app', fit: 'page' });
+    const session = new LiveSession({ json: () => {}, frame: (_h, _j, done) => done() }, { device, postureId: 'book', mode: 'app', fit: 'page' });
     try {
       await session.start();
       await session.navigate(base);
@@ -134,10 +131,8 @@ describe('고친 데모 페이지', () => {
 describe('자세 에뮬레이션', () => {
   it('페이지를 연 뒤에도 navigator.devicePosture가 반 접힘을 유지한다', async () => {
     // 크롬은 문서가 바뀌면 자세 재정의를 풀기 때문에 세션이 새 문서마다 다시 걸어야 한다
-    const browser = await getBrowser();
     const analyses: Analysis[] = [];
     const session = new LiveSession(
-      browser,
       { json: (m) => void (m.t === 'analysis' && analyses.push(m.analysis)), frame: (_h, _j, done) => done() },
       { device: getDevice('galaxy-z-fold7')!, postureId: 'book', mode: 'app', fit: 'page' },
     );

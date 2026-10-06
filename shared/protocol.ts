@@ -1,6 +1,9 @@
 import type { MeasureSnapshot, MeasureUrl } from './measure';
 import type { Analysis, DeviceSpec, DisplayMode, FitPolicy, Layout, ViewportFit } from './types';
 
+/** 페이지를 그리는 엔진. 아이폰 기기는 WebKit(사파리 엔진)으로도 그릴 수 있다 */
+export type Engine = 'chromium' | 'webkit';
+
 /** 브라우저(UI) → 서버 */
 export type ClientMessage =
   | {
@@ -10,10 +13,11 @@ export type ClientMessage =
       postureId: string;
       mode: DisplayMode;
       fit: FitPolicy;
+      engine?: Engine;
     }
   | { t: 'navigate'; url: string }
   | { t: 'history'; dir: 'back' | 'forward' | 'reload' }
-  | { t: 'configure'; device?: DeviceSpec; postureId?: string; mode?: DisplayMode; fit?: FitPolicy }
+  | { t: 'configure'; device?: DeviceSpec; postureId?: string; mode?: DisplayMode; fit?: FitPolicy; engine?: Engine }
   | { t: 'touch'; phase: 'start' | 'move' | 'end' | 'cancel'; x: number; y: number }
   | { t: 'wheel'; x: number; y: number; dx: number; dy: number }
   | { t: 'key'; phase: 'down' | 'up'; key: string; code: string; modifiers: number }
@@ -31,6 +35,9 @@ export interface EmulationSupport {
 }
 
 export interface SessionState {
+  engine: Engine;
+  /** 엔진 버전(예: 141.0.7390.37, 26.0) */
+  engineVersion: string;
   url: string;
   title: string;
   loading: boolean;
@@ -65,7 +72,7 @@ export interface CaptureResult {
 
 /** 서버 → 브라우저(JSON). 화면 프레임은 바이너리 메시지로 따로 보낸다. */
 export type ServerMessage =
-  | { t: 'hello'; browser: string; version: string }
+  | { t: 'hello'; browser: string; version: string; engines: { webkit: boolean } }
   | { t: 'state'; state: SessionState }
   | { t: 'analysis'; analysis: Analysis }
   | { t: 'capture-progress'; done: number; total: number; postureId: string }

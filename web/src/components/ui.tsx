@@ -39,6 +39,7 @@ export interface SegmentOption<T extends string> {
   label: string;
   icon?: LucideIcon;
   hint?: string;
+  disabled?: boolean;
 }
 
 export function Segmented<T extends string>({
@@ -66,7 +67,7 @@ export function Segmented<T extends string>({
           aria-checked={value === o.value}
           className={value === o.value ? 'on' : ''}
           title={o.hint}
-          disabled={disabled}
+          disabled={disabled || o.disabled}
           onClick={() => onChange(o.value)}
         >
           {o.icon && <o.icon size={14} strokeWidth={2} aria-hidden />}

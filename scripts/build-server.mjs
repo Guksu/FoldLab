@@ -26,6 +26,15 @@ const inpage = await esbuild.build({
   legalComments: 'none',
 });
 await writeFile(new URL('inpage.js', out), inpage.outputFiles[0].text);
+const safeArea = await esbuild.build({
+  entryPoints: ['inpage/safearea-entry.ts'],
+  bundle: true,
+  format: 'iife',
+  write: false,
+  target: 'safari16',
+  legalComments: 'none',
+});
+await writeFile(new URL('safearea.js', out), safeArea.outputFiles[0].text);
 await cp('inpage/hooks.js', new URL('hooks.js', out));
 await cp('server/demo', new URL('demo', out), { recursive: true });
 await cp('server/measure', new URL('measure', out), { recursive: true });
