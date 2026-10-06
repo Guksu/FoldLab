@@ -56,7 +56,7 @@ export const SheetView = forwardRef<SVGSVGElement, Props>(function SheetView({ r
       {/* 머리말: 로고, 기기 이름, 주소·시각, 전체 문제 수 */}
       <g transform={`translate(${PAD} 30)`}>
         <rect x={0} y={4} width={8.5} height={15} rx={2.2} fill="#101828" />
-        <path d="M10.5 5.2c0-.45.3-.85.73-.98l6.2-1.86A1.2 1.2 0 0 1 19 3.5v16a1.2 1.2 0 0 1-1.57 1.14l-6.2-1.86a1.03 1.03 0 0 1-.73-.98z" fill="#4f46e5" />
+        <path d="M10.5 5.2c0-.45.3-.85.73-.98l6.2-1.86A1.2 1.2 0 0 1 19 3.5v16a1.2 1.2 0 0 1-1.57 1.14l-6.2-1.86a1.03 1.03 0 0 1-.73-.98z" fill="#667085" />
         <text x={30} y={12} dominantBaseline="central" fontSize={13} fontWeight={600} fill="#667085">
           FoldLab 비교 시트
         </text>

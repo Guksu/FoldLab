@@ -1,6 +1,7 @@
 /* ==========================================================================
    FoldLab 디자인 토큰
-   - 바탕은 차가운 회색 계열, 강조색은 인디고 하나만 쓴다.
+   - 바탕은 차가운 회색 계열, 강조는 거의 검정(#101828)으로 한다.
+   - 보라색 계열과 그라데이션은 쓰지 않는다. 색은 문제 등급(빨강·주황·파랑)과 정상(초록)에만 쓴다.
    - 글자 크기는 11 / 12 / 13 / 14 / 16 / 20 단계, 굵기는 400 / 500 / 600만 쓴다.
    ========================================================================== */
 
@@ -10,7 +11,7 @@
   --surface-2: #f9fafb;
   --surface-3: #f2f4f7;
   --canvas: #eef0f3;
-  --canvas-dot: #d5dae1;
+  --canvas-dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22'%3E%3Ccircle cx='1' cy='1' r='1' fill='%23d5dae1'/%3E%3C/svg%3E");
   --border: #e4e7ec;
   --border-strong: #d0d5dd;
 
@@ -19,11 +20,11 @@
   --text-3: #667085;
   --text-4: #98a2b3;
 
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-soft: #eef2ff;
-  --accent-border: #c7d2fe;
-  --accent-text: #3730a3;
+  --accent: #101828;
+  --accent-hover: #1d2939;
+  --accent-soft: #eaecf0;
+  --accent-border: #b9c0cb;
+  --accent-text: #101828;
 
   --high: #e5484d;
   --high-soft: #fef1f1;
@@ -45,7 +46,7 @@
   --shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
   --shadow-md: 0 6px 16px -4px rgba(16, 24, 40, 0.1), 0 2px 4px -2px rgba(16, 24, 40, 0.05);
   --shadow-lg: 0 16px 36px -8px rgba(16, 24, 40, 0.16), 0 4px 8px -4px rgba(16, 24, 40, 0.06);
-  --ring: 0 0 0 3px rgba(79, 70, 229, 0.2);
+  --ring: 0 0 0 3px rgba(16, 24, 40, 0.12);
 
   --radius-sm: 6px;
   --radius: 8px;
@@ -109,7 +110,7 @@ button:disabled {
 }
 
 ::selection {
-  background: #dfe3ff;
+  background: rgba(16, 24, 40, 0.14);
 }
 
 h1,
@@ -460,7 +461,7 @@ p {
 }
 
 .toggle-chip.on:hover:not(:disabled) {
-  background: #e3e8ff;
+  background: #e4e7ec;
   color: var(--accent-text);
 }
 
@@ -670,7 +671,7 @@ p {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--ok);
 }
 
 .urlbar {
@@ -851,7 +852,7 @@ p {
   padding: 64px 28px 80px;
   overflow: hidden;
   background-color: var(--canvas);
-  background-image: radial-gradient(circle at 1px 1px, var(--canvas-dot) 1px, transparent 0);
+  background-image: var(--canvas-dots);
   background-size: 22px 22px;
 }
 
@@ -997,7 +998,7 @@ p {
 .live-device {
   position: relative;
   flex: none;
-  filter: drop-shadow(0 20px 28px rgba(16, 24, 40, 0.2));
+  filter: drop-shadow(0 10px 18px rgba(16, 24, 40, 0.14));
 }
 
 .live-device .layer {
@@ -1025,9 +1026,7 @@ p {
   gap: 8px;
   padding: 16px;
   overflow: hidden;
-  background-color: #f7f8fa;
-  background-image: linear-gradient(135deg, rgba(16, 24, 40, 0.025) 25%, transparent 25%, transparent 50%, rgba(16, 24, 40, 0.025) 50%, rgba(16, 24, 40, 0.025) 75%, transparent 75%);
-  background-size: 18px 18px;
+  background: #f7f8fa;
   color: var(--text-4);
   font-size: 12.5px;
   font-weight: 500;
@@ -1584,7 +1583,7 @@ p {
   padding: 28px;
   overflow: auto;
   background-color: var(--canvas);
-  background-image: radial-gradient(circle at 1px 1px, var(--canvas-dot) 1px, transparent 0);
+  background-image: var(--canvas-dots);
   background-size: 22px 22px;
 }
 
@@ -1633,7 +1632,7 @@ p {
 }
 
 .toast.info svg {
-  color: #a4bcfd;
+  color: #d0d5dd;
 }
 
 .toast.error svg {
@@ -1779,8 +1778,8 @@ p {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background-color: var(--canvas);
-  background-image: radial-gradient(circle at 1px 1px, var(--canvas-dot) 1px, transparent 0);
-  background-size: 18px 18px;
+  background-image: var(--canvas-dots);
+  background-size: 22px 22px;
 }
 
 .custom-preview-item {

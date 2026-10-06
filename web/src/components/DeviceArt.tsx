@@ -60,30 +60,6 @@ export function DeviceDefs({ uid }: { uid: string }) {
         <rect width="10" height="10" fill="#eceef2" />
         <line x1="0" y1="0" x2="0" y2="10" stroke="#e0e3e8" strokeWidth="4" />
       </pattern>
-      <linearGradient id={`${uid}-crease-v`} x1="0" x2="1" y1="0" y2="0">
-        <stop offset="0" stopColor="#000" stopOpacity="0" />
-        <stop offset="0.42" stopColor="#000" stopOpacity="0.10" />
-        <stop offset="0.5" stopColor="#fff" stopOpacity="0.22" />
-        <stop offset="0.58" stopColor="#000" stopOpacity="0.10" />
-        <stop offset="1" stopColor="#000" stopOpacity="0" />
-      </linearGradient>
-      <linearGradient id={`${uid}-crease-h`} x1="0" x2="0" y1="0" y2="1">
-        <stop offset="0" stopColor="#000" stopOpacity="0" />
-        <stop offset="0.42" stopColor="#000" stopOpacity="0.10" />
-        <stop offset="0.5" stopColor="#fff" stopOpacity="0.22" />
-        <stop offset="0.58" stopColor="#000" stopOpacity="0.10" />
-        <stop offset="1" stopColor="#000" stopOpacity="0" />
-      </linearGradient>
-      <linearGradient id={`${uid}-fold-v`} x1="0" x2="1" y1="0" y2="0">
-        <stop offset="0" stopColor="#000" stopOpacity="0" />
-        <stop offset="0.5" stopColor="#000" stopOpacity="0.28" />
-        <stop offset="1" stopColor="#000" stopOpacity="0" />
-      </linearGradient>
-      <linearGradient id={`${uid}-fold-h`} x1="0" x2="0" y1="0" y2="1">
-        <stop offset="0" stopColor="#000" stopOpacity="0" />
-        <stop offset="0.5" stopColor="#000" stopOpacity="0.28" />
-        <stop offset="1" stopColor="#000" stopOpacity="0" />
-      </linearGradient>
     </defs>
   );
 }
@@ -289,16 +265,23 @@ export function DeviceTop({
             </g>
           );
         }
-        const band = halfOpen ? 70 : 10;
-        return (
+        // 반 접힘이면 넓은 띠, 평평하면 얇은 주름 선(모두 단색)
+        const band = halfOpen ? 28 : 6;
+        const line = halfOpen ? 2 : 1;
+        const strip = (size: number, fill: string) => (
           <rect
-            key={i}
-            x={vertical ? f.at - band / 2 : 0}
-            y={vertical ? 0 : f.at - band / 2}
-            width={vertical ? band : screen.w}
-            height={vertical ? screen.h : band}
-            fill={`url(#${uid}-${halfOpen ? 'fold' : 'crease'}-${vertical ? 'v' : 'h'})`}
+            x={vertical ? f.at - size / 2 : 0}
+            y={vertical ? 0 : f.at - size / 2}
+            width={vertical ? size : screen.w}
+            height={vertical ? screen.h : size}
+            fill={fill}
           />
+        );
+        return (
+          <g key={i}>
+            {strip(band, halfOpen ? 'rgba(0,0,0,0.1)' : 'rgba(0,0,0,0.05)')}
+            {strip(line, halfOpen ? 'rgba(0,0,0,0.24)' : 'rgba(0,0,0,0.14)')}
+          </g>
         );
       })}
       <SplitHandle layout={layout} />
