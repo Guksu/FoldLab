@@ -16,7 +16,7 @@ export function QrCode({ text, size = 168 }: { text: string; size?: number }) {
   return (
     <svg className="qr" viewBox={`0 0 ${n} ${n}`} width={size} height={size} shapeRendering="crispEdges" role="img" aria-label="측정 페이지 주소 QR 코드">
       <rect width={n} height={n} fill="#fff" />
-      <path d={d} fill="#101828" />
+      <path d={d} fill="#1b1e24" />
     </svg>
   );
 }

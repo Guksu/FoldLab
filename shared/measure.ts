@@ -276,6 +276,12 @@ export function customFromSnapshots(base: CustomParams, picks: { cover?: Measure
   const ua = describeUa(any);
   if (ua.platform === 'ios' || ua.platform === 'android') next.platform = ua.platform;
   if (any.ua.model) next.name = any.ua.model;
+  // 한쪽 옆 안전 영역만 크고 위가 비어 있으면 아이폰 듀오처럼 상태 막대가 오른쪽 세로 막대에 있다
+  const sa = any.safeAreaMax ?? any.safeArea;
+  if (sa.right >= 40 && sa.right > sa.left && sa.top < 24) {
+    next.statusBarSide = 'right';
+    next.statusBar = Math.round(sa.right);
+  }
   if (picks.cover) {
     const c = screenSize(picks.cover);
     next.coverW = Math.round(c.w);

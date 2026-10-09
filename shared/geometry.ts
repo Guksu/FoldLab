@@ -346,7 +346,7 @@ export function computeLayout(device: DeviceSpec, postureId: string, opts: Layou
     displayFeature = { orientation: f.axis, offset: Math.round(f.at - f.gap / 2), maskLength: Math.round(f.gap) };
   }
 
-  const obstructions = collectObstructions({ viewport, screenW: W, screenH: H, corners, statusBar, navBar, cutouts, folds });
+  const obstructions = collectObstructions({ viewport, screenW: W, screenH: H, corners, statusBar, statusBarSide: sbSide, navBar, cutouts, folds });
 
   return {
     deviceId: device.id,
@@ -383,6 +383,7 @@ function collectObstructions(a: {
   screenH: number;
   corners: Corners;
   statusBar: Rect | null;
+  statusBarSide: BarSide;
   navBar: Rect | null;
   cutouts: Cutout[];
   folds: ViewportFold[];
@@ -394,8 +395,12 @@ function collectObstructions(a: {
     if (intersect(o.rect, { x: 0, y: 0, w: vp.w, h: vp.h })) out.push(o);
   };
 
-  if (a.statusBar) push({ id: 'status-bar', kind: 'status-bar', shape: 'rect', rect: toVp(a.statusBar), label: '상태 표시줄' });
-  if (a.navBar) push({ id: 'nav-bar', kind: 'nav-bar', shape: 'rect', rect: toVp(a.navBar), label: '제스처 영역' });
+  if (a.statusBar) {
+    const side = a.statusBarSide;
+    const label = side === 'top' ? '상태 표시줄' : `${side === 'left' ? '왼쪽' : '오른쪽'} 상태 막대`;
+    push({ id: 'status-bar', kind: 'status-bar', shape: 'rect', rect: toVp(a.statusBar), edge: side, label });
+  }
+  if (a.navBar) push({ id: 'nav-bar', kind: 'nav-bar', shape: 'rect', rect: toVp(a.navBar), edge: 'bottom', label: '제스처 영역' });
   a.cutouts.forEach((c, i) =>
     push({
       id: `cutout-${i}`,

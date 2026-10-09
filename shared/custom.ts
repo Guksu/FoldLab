@@ -1,5 +1,5 @@
 import { bookPostures, flipPostures } from './devices';
-import type { Cutout, DeviceSpec, Fold, PostureSpec, ScreenSpec } from './types';
+import type { Corners, Cutout, DeviceSpec, Fold, PostureSpec, ScreenSpec } from './types';
 
 /** 기기 직접 만들기 폼의 값 */
 export interface CustomParams {
@@ -20,13 +20,17 @@ export interface CustomParams {
   statusBar: number;
   navBar: number;
   radius: number;
+  /** 커버 화면의 힌지 쪽 모서리 반경. 아이폰 듀오처럼 바깥쪽만 둥글면 radius보다 작다 */
+  hingeRadius: number;
+  /** 상태 표시줄 위치. 'right'는 아이폰 듀오처럼 오른쪽 세로 막대에 시계·다이내믹 아일랜드가 있다 */
+  statusBarSide: 'top' | 'right';
 }
 
 /** 종류를 바꾸면 그 종류에 흔한 값으로 채운다 */
 export const CUSTOM_PRESETS: Record<CustomParams['kind'], Omit<CustomParams, 'name' | 'kind' | 'platform'>> = {
-  book: { dpr: 2.625, coverW: 412, coverH: 904, mainW: 744, mainH: 832, hingeGap: 0, camera: 'top-center', cameraSize: 22, statusBar: 40, navBar: 15, radius: 20 },
-  flip: { dpr: 3, coverW: 360, coverH: 380, mainW: 360, mainH: 840, hingeGap: 0, camera: 'top-center', cameraSize: 20, statusBar: 36, navBar: 15, radius: 24 },
-  dual: { dpr: 2.5, coverW: 0, coverH: 0, mainW: 540, mainH: 720, hingeGap: 34, camera: 'none', cameraSize: 12, statusBar: 24, navBar: 24, radius: 0 },
+  book: { dpr: 2.625, coverW: 412, coverH: 904, mainW: 744, mainH: 832, hingeGap: 0, camera: 'top-center', cameraSize: 22, statusBar: 40, navBar: 15, radius: 20, hingeRadius: 20, statusBarSide: 'top' },
+  flip: { dpr: 3, coverW: 360, coverH: 380, mainW: 360, mainH: 840, hingeGap: 0, camera: 'top-center', cameraSize: 20, statusBar: 36, navBar: 15, radius: 24, hingeRadius: 24, statusBarSide: 'top' },
+  dual: { dpr: 2.5, coverW: 0, coverH: 0, mainW: 540, mainH: 720, hingeGap: 34, camera: 'none', cameraSize: 12, statusBar: 24, navBar: 24, radius: 0, hingeRadius: 0, statusBarSide: 'top' },
 };
 
 export const CUSTOM_DEFAULTS: CustomParams = { name: '내 폴더블', kind: 'book', platform: 'android', ...CUSTOM_PRESETS.book };
@@ -43,6 +47,10 @@ function camera(p: CustomParams, w: number, offsetX = 0, regionW = w): Cutout[] 
     case 'none':
       return [];
     case 'island':
+      // 상태 막대가 오른쪽 세로 막대면 아일랜드도 세워서 그 안에 둔다(아이폰 듀오)
+      if (p.statusBarSide === 'right') {
+        return [{ shape: 'pill', x: offsetX + regionW - Math.round((p.statusBar + 37) / 2), y: 20, w: 37, h: 120, label: '다이내믹 아일랜드' }];
+      }
       return [{ shape: 'pill', x: offsetX + Math.round(regionW / 2 - 63), y: 11, w: 126, h: 37, label: '다이내믹 아일랜드' }];
     case 'top-left':
       return [{ shape: 'circle', x: offsetX + 24, y: top, w: d, h: d, label: '전면 카메라' }];
@@ -53,8 +61,25 @@ function camera(p: CustomParams, w: number, offsetX = 0, regionW = w): Cutout[] 
   }
 }
 
-function screen(id: string, label: string, w: number, h: number, p: CustomParams, cutouts: Cutout[], folds: Fold[]): ScreenSpec {
-  return { id, label, width: w, height: h, dpr: p.dpr, radius: p.radius, cutouts, folds, statusBar: p.statusBar, navBar: p.navBar };
+function screen(
+  id: string,
+  label: string,
+  w: number,
+  h: number,
+  p: CustomParams,
+  cutouts: Cutout[],
+  folds: Fold[],
+  corners?: Corners,
+): ScreenSpec {
+  const side = p.statusBarSide === 'right' ? { statusBarSide: 'right' as const } : {};
+  return { id, label, width: w, height: h, dpr: p.dpr, radius: p.radius, corners, cutouts, folds, statusBar: p.statusBar, navBar: p.navBar, ...side };
+}
+
+/** 커버 화면은 힌지 쪽(책형은 왼쪽, 플립형은 아래쪽) 모서리 반경을 따로 줄 수 있다 */
+function coverCorners(p: CustomParams, flip: boolean): Corners | undefined {
+  const h = p.hingeRadius ?? p.radius;
+  if (h === p.radius) return undefined;
+  return flip ? { tl: p.radius, tr: p.radius, br: h, bl: h } : { tl: h, tr: p.radius, br: p.radius, bl: h };
 }
 
 export function buildCustomDevice(p: CustomParams, id = `custom-${Date.now().toString(36)}`): DeviceSpec {
@@ -100,7 +125,7 @@ export function buildCustomDevice(p: CustomParams, id = `custom-${Date.now().toS
     ...base,
     kind,
     screens: [
-      screen('cover', `커버 화면 ${p.coverW}×${p.coverH}`, p.coverW, p.coverH, p, camera(p, p.coverW), []),
+      screen('cover', `커버 화면 ${p.coverW}×${p.coverH}`, p.coverW, p.coverH, p, camera(p, p.coverW), [], coverCorners(p, flip)),
       screen('main', `메인 화면 ${p.mainW}×${p.mainH}`, p.mainW, p.mainH, p, mainCamera, [fold]),
     ],
     postures: flip ? flipPostures() : bookPostures(),

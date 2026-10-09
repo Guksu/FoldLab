@@ -74,7 +74,7 @@ export const RULES: Record<RuleId, RuleMeta> = {
     id: 'status-bar-overlap',
     name: '상태 표시줄과 겹침',
     description: '시계·배터리 아이콘과 겹쳐 보이고 누르기 어렵습니다.',
-    hint: '상단 고정 영역에 padding-top: env(safe-area-inset-top)을 더하세요.',
+    hint: '상태 표시줄이 붙은 쪽에 env(safe-area-inset-*) 여백을 더하세요. 위쪽이면 top, 아이폰 듀오처럼 옆이면 right(돌리면 left)입니다.',
   },
   'nav-bar-overlap': {
     id: 'nav-bar-overlap',
@@ -117,6 +117,12 @@ export const RULES: Record<RuleId, RuleMeta> = {
     name: '안전 영역 미사용',
     description: 'viewport-fit=cover로 화면 끝까지 그리지만 env(safe-area-inset-*)를 쓰지 않습니다.',
     hint: '가장자리에 붙는 요소에 env(safe-area-inset-*) 여백을 주세요.',
+  },
+  'safe-area-edge': {
+    id: 'safe-area-edge',
+    name: '한쪽 안전 영역 누락',
+    description: '안전 영역은 쓰지만 시스템 UI가 있는 가장자리 하나를 빠뜨렸습니다. 아이폰 듀오처럼 상태 막대가 옆에 붙은 기기는 좌우 값이 서로 다릅니다.',
+    hint: '좌우를 같은 값으로 가정하지 말고 env(safe-area-inset-left)와 env(safe-area-inset-right)를 각각 더하세요.',
   },
   letterbox: {
     id: 'letterbox',

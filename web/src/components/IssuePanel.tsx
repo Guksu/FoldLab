@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { ChevronRight, CircleCheck, Crosshair, Info, Lightbulb, RefreshCw, ScanSearch, TriangleAlert } from 'lucide-react';
+import { ChevronRight, CircleAlert, CircleCheck, Crosshair, Info, Lightbulb, RefreshCw, ScanSearch, TriangleAlert } from 'lucide-react';
 import { RULES, SEVERITY_LABEL, SEVERITY_ORDER } from '../../../shared/rules';
 import type { EmulationSupport, Engine } from '../../../shared/protocol';
-import type { Analysis, Insets, Layout, Severity } from '../../../shared/types';
+import type { Analysis, Corners, Insets, Layout, PageEnv, Severity } from '../../../shared/types';
 import { SEVERITY_COLOR } from '../lib/format';
 import { Button, IconButton } from './ui';
 
@@ -21,8 +21,32 @@ interface Props {
   live: boolean;
 }
 
+/** 등급은 색 대신 아이콘 모양으로 나눈다(높음만 빨강) */
+const SEV_ICON = { high: TriangleAlert, warn: CircleAlert, info: Info } as const;
+
+function SevIcon({ severity }: { severity: Severity }) {
+  const Icon = SEV_ICON[severity];
+  return <Icon className={severity} size={14} strokeWidth={2} aria-hidden />;
+}
+
 function insetText(i: Insets) {
   return `${i.top} / ${i.right} / ${i.bottom} / ${i.left}`;
+}
+
+function cornerText(c: Corners) {
+  return `${Math.round(c.tl)} / ${Math.round(c.tr)} / ${Math.round(c.br)} / ${Math.round(c.bl)}`;
+}
+
+function isAsymmetric(c: Corners) {
+  const r = [c.tl, c.tr, c.br, c.bl];
+  return Math.max(...r) - Math.min(...r) >= 8;
+}
+
+/** CSS가 env(safe-area-inset-*)를 쓰는 가장자리 */
+function edgeUsageText(e: PageEnv['safeAreaEdges']) {
+  const used = (['top', 'right', 'bottom', 'left'] as const).filter((k) => e[k]);
+  const name = { top: '위', right: '오른쪽', bottom: '아래', left: '왼쪽' };
+  return used.length === 4 ? '네 방향 사용' : `${used.map((k) => name[k]).join('·')}만 사용`;
 }
 
 export function IssuePanel(props: Props) {
@@ -64,7 +88,7 @@ export function IssuePanel(props: Props) {
               title={on ? '거르기 해제' : `${SEVERITY_LABEL[s]}만 보기`}
             >
               <span className="sev-tile-label">
-                <i className="dot" style={{ background: SEVERITY_COLOR[s] }} />
+                <SevIcon severity={s} />
                 {SEVERITY_LABEL[s]}
               </span>
               <b>{n ?? '–'}</b>
@@ -180,6 +204,12 @@ export function IssuePanel(props: Props) {
               <dd title="위 / 오른쪽 / 아래 / 왼쪽">
                 {env ? insetText(env.safeArea) : insetText(layout.insets)}
                 {layout.mode === 'app' && <span className="muted"> (가림 {insetText(layout.rawInsets)})</span>}
+                {env?.usesSafeArea && <span className="muted"> · CSS {edgeUsageText(env.safeAreaEdges)}</span>}
+              </dd>
+              <dt>모서리</dt>
+              <dd title="왼쪽 위 / 오른쪽 위 / 오른쪽 아래 / 왼쪽 아래 반경">
+                {cornerText(layout.screen.corners)}
+                {isAsymmetric(layout.screen.corners) && <span className="badge badge-neutral">비대칭</span>}
               </dd>
               <dt>세그먼트</dt>
               <dd>

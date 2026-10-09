@@ -147,6 +147,8 @@ export interface Obstruction {
   rect: Rect;
   corner?: 'tl' | 'tr' | 'bl' | 'br';
   radius?: number;
+  /** 시스템 바가 붙은 가장자리(옆으로 붙은 상태 막대는 겹친 깊이를 가로로 잰다) */
+  edge?: keyof Insets;
   label: string;
 }
 
@@ -225,6 +227,7 @@ export type RuleId =
   | 'line-length'
   | 'wide-unused'
   | 'safe-area-unused'
+  | 'safe-area-edge'
   | 'letterbox'
   | 'segments-unaware'
   | 'sticky-overload'
@@ -270,6 +273,8 @@ export interface PageEnv {
   segments: Rect[];
   posture: string | null;
   usesSafeArea: boolean;
+  /** CSS가 가장자리별로 env(safe-area-inset-*)를 쓰는지 */
+  safeAreaEdges: { top: boolean; right: boolean; bottom: boolean; left: boolean };
   usesSegments: boolean;
   usesPosture: boolean;
   unreadableSheets: number;
