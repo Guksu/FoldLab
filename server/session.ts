@@ -103,9 +103,9 @@ export class LiveSession {
       this.driver.documentChanged(frame.url());
       void this.pushState();
     });
-    page.on('domcontentloaded', () => void this.onDocumentReady());
+    page.on('domcontentloaded', () => void this.onDocumentReady().catch((e) => this.ignoreIfClosed(e)));
     page.on('load', () => {
-      void this.onDocumentReady();
+      void this.onDocumentReady().catch((e) => this.ignoreIfClosed(e));
       this.scheduleAnalyze(400);
     });
     page.on('dialog', (d) => {
@@ -243,6 +243,13 @@ export class LiveSession {
     const url = popup.url();
     await popup.close().catch(() => {});
     if (url && url !== 'about:blank') await this.navigate(url).catch((e) => this.sink.json({ t: 'error', message: String(e.message) }));
+  }
+
+  /** 페이지 이벤트에서 시작한 작업이 세션을 닫는 중에 실패하면 무시한다(처리 안 된 오류로 서버가 죽지 않게) */
+  private ignoreIfClosed(err: unknown): void {
+    if (this.closed) return;
+    const msg = String((err as Error)?.message ?? err);
+    if (!/closed|Target|destroyed|navigat/i.test(msg)) console.warn('[foldlab] 문서 준비 처리 실패:', msg);
   }
 
   private async onDocumentReady(): Promise<void> {

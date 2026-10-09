@@ -66,7 +66,12 @@ export function CustomDeviceDialog({ initial, onSave, onClose }: Props) {
         max={max}
         step={step}
         value={p[key]}
-        onChange={(e) => setP({ ...p, [key]: Number(e.target.value) })}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          // 힌지 쪽 모서리를 따로 바꾸지 않았으면 모서리 반경을 따라간다
+          const follow = key === 'radius' && (p.hingeRadius ?? p.radius) === p.radius ? { hingeRadius: v } : {};
+          setP({ ...p, [key]: v, ...follow });
+        }}
       />
     </label>
   );
@@ -170,9 +175,20 @@ export function CustomDeviceDialog({ initial, onSave, onClose }: Props) {
                     </Select>
                   </label>
                   {p.camera !== 'island' && p.camera !== 'none' && num('cameraSize', '카메라 지름', 6, 40)}
-                  {num('statusBar', '상태 표시줄', 0, 80)}
+                  <label className="form-field">
+                    <span>상태 표시줄 위치</span>
+                    <Select
+                      value={p.statusBarSide ?? 'top'}
+                      onChange={(e) => setP({ ...p, statusBarSide: e.target.value as CustomParams['statusBarSide'] })}
+                    >
+                      <option value="top">위쪽 가로</option>
+                      <option value="right">오른쪽 세로 막대 (아이폰 듀오)</option>
+                    </Select>
+                  </label>
+                  {num('statusBar', p.statusBarSide === 'right' ? '상태 막대 폭' : '상태 표시줄', 0, 120)}
                   {num('navBar', '홈 인디케이터', 0, 60)}
                   {num('radius', '모서리 반경', 0, 80)}
+                  {!dual && num('hingeRadius', '커버 힌지 쪽 모서리', 0, 80)}
                 </div>
               </section>
 

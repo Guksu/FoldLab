@@ -118,6 +118,12 @@ export const RULES: Record<RuleId, RuleMeta> = {
     description: 'viewport-fit=cover로 화면 끝까지 그리지만 env(safe-area-inset-*)를 쓰지 않습니다.',
     hint: '가장자리에 붙는 요소에 env(safe-area-inset-*) 여백을 주세요.',
   },
+  'safe-area-edge': {
+    id: 'safe-area-edge',
+    name: '한쪽 안전 영역 누락',
+    description: '안전 영역은 쓰지만 시스템 UI가 있는 가장자리 하나를 빠뜨렸습니다. 아이폰 듀오처럼 상태 막대가 옆에 붙은 기기는 좌우 값이 서로 다릅니다.',
+    hint: '좌우를 같은 값으로 가정하지 말고 env(safe-area-inset-left)와 env(safe-area-inset-right)를 각각 더하세요.',
+  },
   letterbox: {
     id: 'letterbox',
     name: '레터박스',

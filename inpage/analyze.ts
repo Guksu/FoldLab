@@ -181,6 +181,9 @@ function pillHits(r: Rect, p: Rect): boolean {
 }
 
 /** 둥근 모서리 곡선 바깥으로 depth px 이상 나갔는지 */
+const CORNER_NAME = { tl: '왼쪽 위', tr: '오른쪽 위', br: '오른쪽 아래', bl: '왼쪽 아래' } as const;
+const EDGE_NAME = { top: '위', right: '오른쪽', bottom: '아래', left: '왼쪽' } as const;
+
 function cornerClips(r: Rect, o: Obstruction, depth = 2): boolean {
   const sq = o.rect;
   const rad = o.radius ?? sq.w;
@@ -317,10 +320,30 @@ function readSafeArea(): Insets {
   return out;
 }
 
-function scanCss(): { safe: boolean; segments: boolean; posture: boolean; unreadable: number } {
-  const res = { safe: false, segments: false, posture: false, unreadable: 0 };
+interface CssUsage {
+  safe: boolean;
+  edges: { top: boolean; right: boolean; bottom: boolean; left: boolean };
+  segments: boolean;
+  posture: boolean;
+  unreadable: number;
+}
+
+/** FoldLab이 WebKit에서 안전 영역을 흉내 내려고 넣은 사용자 정의 속성 이름은 페이지가 쓴 것으로 치지 않는다 */
+const OWN_SAFE_VAR = /--foldlab-safe-area-inset-/g;
+const SAFE_EDGE = /safe-area-(?:max-)?inset-(top|right|bottom|left)/g;
+
+function scanCss(): CssUsage {
+  const res: CssUsage = { safe: false, edges: { top: false, right: false, bottom: false, left: false }, segments: false, posture: false, unreadable: 0 };
+  const testSafe = (raw: string) => {
+    if (raw.indexOf('safe-area') === -1) return;
+    const text = raw.replace(OWN_SAFE_VAR, '');
+    for (const m of text.matchAll(SAFE_EDGE)) {
+      res.edges[m[1] as keyof CssUsage['edges']] = true;
+      res.safe = true;
+    }
+  };
   const test = (text: string) => {
-    if (!res.safe && text.includes('safe-area-inset')) res.safe = true;
+    testSafe(text);
     if (!res.segments && /viewport-segment|screen-spanning|spanning\s*:/.test(text)) res.segments = true;
     if (!res.posture && text.includes('device-posture')) res.posture = true;
   };
@@ -352,7 +375,7 @@ function scanCss(): { safe: boolean; segments: boolean; posture: boolean; unread
       res.unreadable++;
     }
   }
-  if (!res.safe && document.querySelector('[style*="safe-area-inset"]')) res.safe = true;
+  document.querySelectorAll('[style*="safe-area"]').forEach((el) => testSafe(el.getAttribute('style') ?? ''));
   return res;
 }
 
@@ -365,6 +388,8 @@ export function analyze(input: AnalyzeInput): AnalyzeOutput {
   const vw = input.viewport.w;
   const vh = input.viewport.h;
   const VP: Rect = { x: 0, y: 0, w: vw, h: vh };
+  const cornerRadii = input.obstructions.filter((o) => o.kind === 'corner').map((o) => Math.round(o.radius ?? 0));
+  const cornersAsymmetric = cornerRadii.length > 1 && Math.max(...cornerRadii) - Math.min(...cornerRadii) >= 8;
   const vv = window.visualViewport;
   const s = vv ? vv.scale : 1;
   const ox = vv ? vv.offsetLeft : 0;
@@ -654,12 +679,17 @@ export function analyze(input: AnalyzeInput): AnalyzeOutput {
           add('cutout-overlap', kind === 'interactive' ? 'high' : 'warn', el, [t], `${o.label}이(가) ${describe(el)}을(를) 덮습니다.`, it.fixed);
         } else if (o.kind === 'status-bar' || o.kind === 'nav-bar') {
           const i = inter(t, o.rect)!;
-          const depth = i.h;
-          if (depth < Math.min(6, t.h * 0.25)) continue;
+          // 옆으로 붙은 상태 막대(아이폰 듀오)는 가로로 파고든 깊이를 잰다
+          const side = o.edge === 'left' || o.edge === 'right';
+          const depth = side ? i.w : i.h;
+          if (depth < Math.min(6, (side ? t.w : t.h) * 0.25)) continue;
           const rule: RuleId = o.kind === 'status-bar' ? 'status-bar-overlap' : 'nav-bar-overlap';
-          add(rule, kind === 'interactive' ? 'high' : 'warn', el, [t], `${o.label}에 ${Math.round(depth)}px 겹칩니다.`, it.fixed);
+          const fix = side ? ` env(safe-area-inset-${o.edge})만큼 여백을 더하세요.` : '';
+          add(rule, kind === 'interactive' ? 'high' : 'warn', el, [t], `${o.label}에 ${Math.round(depth)}px 겹칩니다.${fix}`, it.fixed);
         } else if (o.kind === 'corner') {
-          add('corner-clip', 'warn', el, [t], '화면 모서리 곡선에 걸려 일부가 잘려 보입니다.', it.fixed);
+          const where = o.corner ? `${CORNER_NAME[o.corner]} 모서리(반경 ${Math.round(o.radius ?? 0)}px)` : '화면 모서리';
+          const note = cornersAsymmetric ? ' 이 화면은 모서리마다 곡률이 달라 반대쪽과 같은 여백으로는 부족합니다.' : '';
+          add('corner-clip', 'warn', el, [t], `${where} 곡선에 걸려 일부가 잘려 보입니다.${note}`, it.fixed);
         }
       }
     }
@@ -832,6 +862,28 @@ export function analyze(input: AnalyzeInput): AnalyzeOutput {
     }
   }
 
+  // ---------- 가장자리별 안전 영역 ----------
+  // 안전 영역을 쓰더라도 좌우를 같다고 가정하거나 위·아래만 챙기면, 값이 한쪽에만 있는 기기(아이폰 듀오의 오른쪽 상태 막대)에서 가려진다
+  const safeArea = readSafeArea();
+  if (cssUsage.safe) {
+    for (const edge of ['left', 'right', 'top', 'bottom'] as const) {
+      const v = safeArea[edge];
+      if (v < 8 || cssUsage.edges[edge]) continue;
+      const band: Rect =
+        edge === 'left' ? { x: 0, y: 0, w: v, h: vh } : edge === 'right' ? { x: vw - v, y: 0, w: v, h: vh } : edge === 'top' ? { x: 0, y: 0, w: vw, h: v } : { x: 0, y: vh - v, w: vw, h: v };
+      const other = edge === 'left' ? 'right' : edge === 'right' ? 'left' : null;
+      const mirror = other && cssUsage.edges[other] ? ` env(safe-area-inset-${other})는 쓰지만 이 기기는 ${EDGE_NAME[other]} 값이 ${Math.round(safeArea[other])}px라 서로 다릅니다.` : '';
+      add(
+        'safe-area-edge',
+        edge === 'left' || edge === 'right' ? 'warn' : 'info',
+        null,
+        [band],
+        `${EDGE_NAME[edge]} 가장자리에 ${Math.round(v)}px 안전 영역이 있지만 env(safe-area-inset-${edge})를 쓰는 CSS가 없습니다.${mirror}`,
+        true,
+      );
+    }
+  }
+
   if (input.twoSegments && !usesSegments && !usesPosture) {
     add(
       'segments-unaware',
@@ -883,10 +935,11 @@ export function analyze(input: AnalyzeInput): AnalyzeOutput {
     dpr: window.devicePixelRatio,
     viewportMeta: metaContent,
     viewportFit: pageFit === 'cover' || pageFit === 'contain' ? pageFit : 'auto',
-    safeArea: readSafeArea(),
+    safeArea,
     segments: Array.from(seg).map((r) => ({ x: r.x, y: r.y, w: r.width, h: r.height })),
     posture: nav.devicePosture?.type ?? null,
     usesSafeArea: cssUsage.safe,
+    safeAreaEdges: cssUsage.edges,
     usesSegments,
     usesPosture,
     unreadableSheets: cssUsage.unreadable,
