@@ -55,16 +55,16 @@ export const SheetView = forwardRef<SVGSVGElement, Props>(function SheetView({ r
 
       {/* 머리말: 로고, 기기 이름, 주소·시각, 전체 문제 수 */}
       <g transform={`translate(${PAD} 30)`}>
-        <rect x={0} y={4} width={8.5} height={15} rx={2.2} fill="#101828" />
-        <path d="M10.5 5.2c0-.45.3-.85.73-.98l6.2-1.86A1.2 1.2 0 0 1 19 3.5v16a1.2 1.2 0 0 1-1.57 1.14l-6.2-1.86a1.03 1.03 0 0 1-.73-.98z" fill="#667085" />
-        <text x={30} y={12} dominantBaseline="central" fontSize={13} fontWeight={600} fill="#667085">
+        <rect x={0} y={4} width={8.5} height={15} rx={2.2} fill="#1b1e24" />
+        <path d="M10.5 5.2c0-.45.3-.85.73-.98l6.2-1.86A1.2 1.2 0 0 1 19 3.5v16a1.2 1.2 0 0 1-1.57 1.14l-6.2-1.86a1.03 1.03 0 0 1-.73-.98z" fill="#646b77" />
+        <text x={30} y={12} dominantBaseline="central" fontSize={13} fontWeight={600} fill="#646b77">
           FoldLab 비교 시트
         </text>
       </g>
-      <text x={PAD} y={76} fontSize={21} fontWeight={700} fill="#101828" letterSpacing="-0.02em">
+      <text x={PAD} y={76} fontSize={21} fontWeight={700} fill="#1b1e24">
         {device.name}
       </text>
-      <text x={PAD} y={HEADER - 4} fontSize={12} fill="#667085" fontFamily={MONO}>
+      <text x={PAD} y={HEADER - 4} fontSize={12} fill="#646b77" fontFamily={MONO}>
         {url} · {formatTime(result.at)} · {MODE_LABEL[result.mode]}
         {debug ? '' : ' · 디버그 표시 없음'}
       </text>
@@ -79,16 +79,16 @@ export const SheetView = forwardRef<SVGSVGElement, Props>(function SheetView({ r
           rx -= 6;
           return (
             <g key={s}>
-              <rect x={cx} y={56} width={cw} height={26} rx={7} fill={n ? SEVERITY_TINT[s].bg : '#f2f4f7'} />
-              <circle cx={cx + 13} cy={69} r={3.5} fill={n ? SEVERITY_COLOR[s] : '#c0c7d2'} />
-              <text x={cx + 22} y={69.5} dominantBaseline="central" fontSize={12.5} fontWeight={600} fill={n ? SEVERITY_TINT[s].fg : '#98a2b3'}>
+              <rect x={cx} y={56} width={cw} height={26} rx={7} fill={SEVERITY_TINT[s].bg} />
+              <circle cx={cx + 13} cy={69} r={3.5} fill={n ? SEVERITY_COLOR[s] : '#a3a8b1'} />
+              <text x={cx + 22} y={69.5} dominantBaseline="central" fontSize={12.5} fontWeight={600} fill={n ? SEVERITY_TINT[s].fg : '#646b77'}>
                 {label}
               </text>
             </g>
           );
         });
       })()}
-      <line x1={PAD} x2={width - PAD} y1={HEADER + 14} y2={HEADER + 14} stroke="#eef0f3" />
+      <line x1={PAD} x2={width - PAD} y1={HEADER + 14} y2={HEADER + 14} stroke="#e4e6ea" />
 
       {placed.map(({ item, box, x: fx, h }, i) => {
         const uid = `sheet${i}`;
@@ -117,7 +117,7 @@ export const SheetView = forwardRef<SVGSVGElement, Props>(function SheetView({ r
                 />
               )}
             </g>
-            <text x={fx} y={capY + 26} fontSize={14} fontWeight={600} fill="#101828">
+            <text x={fx} y={capY + 26} fontSize={14} fontWeight={600} fill="#1b1e24">
               {postureLabel(device, item.postureId)}
               <tspan dx={8} fontSize={11.5} fontWeight={400} fill="#98a2b3" fontFamily={MONO}>
                 {vp.w}×{vp.h}

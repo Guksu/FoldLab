@@ -74,7 +74,7 @@ export const RULES: Record<RuleId, RuleMeta> = {
     id: 'status-bar-overlap',
     name: '상태 표시줄과 겹침',
     description: '시계·배터리 아이콘과 겹쳐 보이고 누르기 어렵습니다.',
-    hint: '상단 고정 영역에 padding-top: env(safe-area-inset-top)을 더하세요.',
+    hint: '상태 표시줄이 붙은 쪽에 env(safe-area-inset-*) 여백을 더하세요. 위쪽이면 top, 아이폰 듀오처럼 옆이면 right(돌리면 left)입니다.',
   },
   'nav-bar-overlap': {
     id: 'nav-bar-overlap',

@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Smartphone,
   Trash2,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import { DEFAULT_DEVICE_ID, DEVICES } from '../../shared/devices';
@@ -701,9 +702,12 @@ export function App() {
 function ToastView({ toast, onClose }: { toast: Toast; onClose: () => void }) {
   const Icon = TOAST_ICON[toast.kind];
   return (
-    <div className={`toast ${toast.kind}`} role={toast.kind === 'error' ? 'alert' : 'status'} onClick={onClose}>
+    <div className={`toast ${toast.kind}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
       <Icon size={16} aria-hidden />
-      <span>{toast.text}</span>
+      <span className="toast-text">{toast.text}</span>
+      <button type="button" className="toast-close" aria-label="알림 닫기" onClick={onClose}>
+        <X size={14} aria-hidden />
+      </button>
     </div>
   );
 }

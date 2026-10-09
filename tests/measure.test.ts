@@ -140,7 +140,8 @@ describe('측정 페이지와 수신', () => {
       .catch(() => {});
     try {
       await page.goto(`${base}/measure?t=${hub.token}`);
-      await expect.poll(() => received.length, { timeout: 15000 }).toBeGreaterThan(0);
+      // 크로미움은 새 문서에 자세 재정의를 늦게 반영해 첫 측정값이 펼침일 수 있다. 측정 페이지는 자세가 바뀌면 다시 재서 보낸다
+      await expect.poll(() => received.at(-1)?.posture, { timeout: 15000 }).toBe('folded');
       const s = received[received.length - 1];
       expect(s.ua.string).toContain('Chrome');
       expect(s.viewport).toMatchObject({ width: layout.viewport.w, height: layout.viewport.h });

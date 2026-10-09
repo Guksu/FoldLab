@@ -1,16 +1,17 @@
 import type { DeviceSpec, DisplayMode, Issue, Layout, Severity } from '../../../shared/types';
 
+/** 문제 등급 색 — 높음만 오류 빨강, 주의는 진한 무채색, 참고는 옅은 무채색(등급 이름을 늘 함께 쓴다) */
 export const SEVERITY_COLOR: Record<Severity, string> = {
-  high: '#e5484d',
-  warn: '#d97706',
-  info: '#3b82f6',
+  high: '#c8341f',
+  warn: '#1b1e24',
+  info: '#646b77',
 };
 
-/** 흰 바탕 위 옅은 칩에 쓰는 색(배경, 글자) */
+/** 흰 바탕 위 칩(배경은 옅은 회색 하나, 글자만 등급 색) */
 export const SEVERITY_TINT: Record<Severity, { bg: string; fg: string }> = {
-  high: { bg: '#fef1f1', fg: '#c3292e' },
-  warn: { bg: '#fff7e8', fg: '#a14f04' },
-  info: { bg: '#eff5ff', fg: '#1d4ed8' },
+  high: { bg: '#f2f3f5', fg: '#c8341f' },
+  warn: { bg: '#f2f3f5', fg: '#1b1e24' },
+  info: { bg: '#f2f3f5', fg: '#4b5260' },
 };
 
 export const MODE_LABEL: Record<DisplayMode, string> = {

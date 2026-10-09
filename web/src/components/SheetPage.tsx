@@ -86,7 +86,7 @@ export function SheetPage(props: Props) {
               </span>
             </div>
             <div className="progress-track">
-              <div style={{ width: `${Math.max(4, (progress.done / Math.max(1, progress.total)) * 100)}%` }} />
+              <div style={{ transform: `scaleX(${Math.max(0.04, progress.done / Math.max(1, progress.total))})` }} />
             </div>
           </section>
         )}

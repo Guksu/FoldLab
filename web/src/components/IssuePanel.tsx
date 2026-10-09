@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, CircleCheck, Crosshair, Info, Lightbulb, RefreshCw, ScanSearch, TriangleAlert } from 'lucide-react';
+import { ChevronRight, CircleAlert, CircleCheck, Crosshair, Info, Lightbulb, RefreshCw, ScanSearch, TriangleAlert } from 'lucide-react';
 import { RULES, SEVERITY_LABEL, SEVERITY_ORDER } from '../../../shared/rules';
 import type { EmulationSupport, Engine } from '../../../shared/protocol';
 import type { Analysis, Corners, Insets, Layout, PageEnv, Severity } from '../../../shared/types';
@@ -19,6 +19,14 @@ interface Props {
   onReveal: (ref: number) => void;
   onReanalyze: () => void;
   live: boolean;
+}
+
+/** 등급은 색 대신 아이콘 모양으로 나눈다(높음만 빨강) */
+const SEV_ICON = { high: TriangleAlert, warn: CircleAlert, info: Info } as const;
+
+function SevIcon({ severity }: { severity: Severity }) {
+  const Icon = SEV_ICON[severity];
+  return <Icon className={severity} size={14} strokeWidth={2} aria-hidden />;
 }
 
 function insetText(i: Insets) {
@@ -80,7 +88,7 @@ export function IssuePanel(props: Props) {
               title={on ? '거르기 해제' : `${SEVERITY_LABEL[s]}만 보기`}
             >
               <span className="sev-tile-label">
-                <i className="dot" style={{ background: SEVERITY_COLOR[s] }} />
+                <SevIcon severity={s} />
                 {SEVERITY_LABEL[s]}
               </span>
               <b>{n ?? '–'}</b>

@@ -154,10 +154,10 @@ export function CheckChip({ on, onChange, children, disabled }: { on: boolean; o
 export function Logo({ size = 24 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
-      <rect x="2.5" y="4.5" width="8.5" height="15" rx="2.2" fill="#101828" />
+      <rect x="2.5" y="4.5" width="8.5" height="15" rx="2.2" fill="#1b1e24" />
       <path
         d="M13 5.7c0-.45.3-.85.73-.98l6.2-1.86A1.2 1.2 0 0 1 21.5 4v16a1.2 1.2 0 0 1-1.57 1.14l-6.2-1.86A1.03 1.03 0 0 1 13 18.3z"
-        fill="#667085"
+        fill="#646b77"
       />
     </svg>
   );

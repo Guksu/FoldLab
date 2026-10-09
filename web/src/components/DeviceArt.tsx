@@ -48,13 +48,13 @@ function isLight(color?: string): boolean {
 export function DeviceDefs({ uid }: { uid: string }) {
   return (
     <defs>
-      <pattern id={`${uid}-hatch-amber`} width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-        <rect width="7" height="7" fill="rgba(217,119,6,0.09)" />
-        <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(217,119,6,0.6)" strokeWidth="2" />
+      <pattern id={`${uid}-hatch-block`} width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <rect width="7" height="7" fill="rgba(27,30,36,0.06)" />
+        <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(27,30,36,0.42)" strokeWidth="2" />
       </pattern>
       <pattern id={`${uid}-hatch-red`} width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
-        <rect width="7" height="7" fill="rgba(229,72,77,0.12)" />
-        <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(229,72,77,0.7)" strokeWidth="2" />
+        <rect width="7" height="7" fill="rgba(200,52,31,0.1)" />
+        <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(200,52,31,0.7)" strokeWidth="2" />
       </pattern>
       <pattern id={`${uid}-stripes`} width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
         <rect width="10" height="10" fill="#eceef2" />
@@ -320,7 +320,7 @@ export interface OverlayToggles {
   segments: boolean;
 }
 
-function Chip({ x, y, text, color = '#101828', scale, anchor = 'start' }: { x: number; y: number; text: string; color?: string; scale: number; anchor?: 'start' | 'middle' | 'end' }) {
+function Chip({ x, y, text, color = '#1b1e24', scale, anchor = 'start' }: { x: number; y: number; text: string; color?: string; scale: number; anchor?: 'start' | 'middle' | 'end' }) {
   const fs = 10.5 * scale;
   const w = (text.length * 6.1 + 10) * scale;
   const h = 16 * scale;
@@ -380,8 +380,8 @@ export function DebugOverlay({
             cx={r.x + r.w / 2}
             cy={r.y + r.h / 2}
             r={r.w / 2 + 6}
-            fill={`url(#${uid}-hatch-amber)`}
-            stroke="rgba(217,119,6,0.85)"
+            fill={`url(#${uid}-hatch-block)`}
+            stroke="rgba(27,30,36,0.7)"
             strokeWidth={1.2}
           />,
         );
@@ -392,10 +392,10 @@ export function DebugOverlay({
         const px = o.corner === 'tl' || o.corner === 'bl' ? r.x : r.x + r.w;
         const py = o.corner === 'tl' || o.corner === 'tr' ? r.y : r.y + r.h;
         const d = `M${px},${py} L${px},${cy} A${rad},${rad} 0 0 ${o.corner === 'tl' || o.corner === 'br' ? 1 : 0} ${cx},${py} Z`;
-        parts.push(<path key={`ob-${o.id}`} d={d} fill={`url(#${uid}-hatch-amber)`} />);
+        parts.push(<path key={`ob-${o.id}`} d={d} fill={`url(#${uid}-hatch-block)`} />);
       } else {
         parts.push(
-          <rect key={`ob-${o.id}`} x={r.x} y={r.y} width={r.w} height={r.h} fill={`url(#${uid}-hatch-amber)`} stroke="rgba(217,119,6,0.55)" strokeWidth={0.8} />,
+          <rect key={`ob-${o.id}`} x={r.x} y={r.y} width={r.w} height={r.h} fill={`url(#${uid}-hatch-block)`} stroke="rgba(27,30,36,0.45)" strokeWidth={0.8} />,
         );
       }
     });
@@ -406,7 +406,7 @@ export function DebugOverlay({
       if (!raw) return;
       const got = env ? Math.round(env[edge]) : layout.insets[edge];
       const text = `${EDGE_LABEL[edge]} ${raw} · env ${got}`;
-      const color = got >= raw ? '#067647' : '#b45309';
+      const color = got >= raw ? '#13795b' : '#c8341f';
       const pos =
         edge === 'top'
           ? { x: vp.x + vp.w - 8 * s, y: layout.window.y + raw + 4 * s, anchor: 'end' as const }
@@ -427,13 +427,13 @@ export function DebugOverlay({
       const red = f.gap > 0 || f.separating;
       parts.push(
         <g key={`fold-${i}`}>
-          <rect x={z.x} y={z.y} width={z.w} height={z.h} fill={red ? `url(#${uid}-hatch-red)` : 'rgba(217,119,6,0.09)'} />
-          <line {...line} stroke={red ? '#e5484d' : '#d97706'} strokeWidth={1.2 * s} strokeDasharray={`${5 * s} ${4 * s}`} />
+          <rect x={z.x} y={z.y} width={z.w} height={z.h} fill={red ? `url(#${uid}-hatch-red)` : 'rgba(27,30,36,0.06)'} />
+          <line {...line} stroke={red ? '#c8341f' : '#1b1e24'} strokeWidth={1.2 * s} strokeDasharray={`${5 * s} ${4 * s}`} />
           <Chip
             x={vertical ? vp.x + f.at : vp.x + 8 * s}
             y={vertical ? vp.y + vp.h * 0.36 : vp.y + f.at - 22 * s}
             text={f.gap > 0 ? `힌지 ${f.gap}px` : f.separating ? '접는 선' : '주름'}
-            color={red ? '#c3292e' : '#b45309'}
+            color={red ? '#c8341f' : '#1b1e24'}
             scale={s}
             anchor={vertical ? 'middle' : 'start'}
           />
@@ -452,11 +452,11 @@ export function DebugOverlay({
             width={Math.max(0, seg.w - 6)}
             height={Math.max(0, seg.h - 6)}
             fill="none"
-            stroke="#3b82f6"
+            stroke="#1b1e24"
             strokeWidth={1.4 * s}
             strokeDasharray={`${7 * s} ${5 * s}`}
           />
-          <Chip x={vp.x + seg.x + 8 * s} y={vp.y + seg.y + seg.h - 24 * s} text={`seg ${i} · ${Math.round(seg.w)}×${Math.round(seg.h)}`} color="#1d4ed8" scale={s} />
+          <Chip x={vp.x + seg.x + 8 * s} y={vp.y + seg.y + seg.h - 24 * s} text={`seg ${i} · ${Math.round(seg.w)}×${Math.round(seg.h)}`} color="#1b1e24" scale={s} />
         </g>,
       );
     });
